@@ -483,6 +483,7 @@ int main()
         std::cout << w;
         first = false;
     }
-    std::cout << "\n";
+    std::cout << "\nPress any key\n";
+	getchar();
     return 0;
 }

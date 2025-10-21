@@ -387,8 +387,8 @@ std::vector<std::vector<std::string>> inputBallotsByRowNumbers(const std::vector
     std::cout << "Enter ballots as comma-separated row numbers in preference order (e.g., 1,3,2).\n";
     std::cout << "Press Enter on an empty line to finish.\n";
 
-    for (;;) {
-        std::cout << "> ";
+    for (int i = 1;i > 0;i++) {
+        std::cout << i << ": ";
         std::string line;
         if (!std::getline(std::cin, line)) break; // EOF
         const std::string s = trim(line);

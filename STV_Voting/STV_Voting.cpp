@@ -213,15 +213,49 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
     std::vector<std::map<std::string, double>> history;
     history.push_back(voteCounts);
 
-    // Helper: elect everyone meeting quota
+    // Helper: elect everyone meeting quota (but never exceed seats)
     auto electByQuota = [&]() -> std::vector<std::string>
     {
-        std::vector<std::string> newly;
+        std::vector<std::string> eligible;
         for (const auto& [cand, votes] : voteCounts) {
             if (!elected.count(cand) && votes >= quota) {
+                eligible.push_back(cand);
+            }
+        }
+        if (eligible.empty()) return {};
+
+        const int seatsLeft = seats - static_cast<int>(elected.size());
+        std::vector<std::string> newly;
+
+        // If we have room for all, elect them all.
+        if (static_cast<int>(eligible.size()) <= seatsLeft) {
+            for (const auto& cand : eligible) {
                 elected.insert(cand);
                 newly.push_back(cand);
             }
+            return newly;
+        }
+
+        // More eligible than seats left — select deterministically using vote totals and §11D tie-break.
+        std::set<std::string> remainingEligible(eligible.begin(), eligible.end());
+        for (int i = 0; i < seatsLeft; ++i) {
+            double bestVotes = -std::numeric_limits<double>::infinity();
+            for (const auto& c : remainingEligible) {
+                bestVotes = std::max(bestVotes, voteCounts[c]);
+            }
+
+            std::set<std::string> tied;
+            for (const auto& c : remainingEligible) {
+                if (voteCounts[c] == bestVotes) tied.insert(c);
+            }
+
+            std::string chosen = (tied.size() == 1)
+                ? *tied.begin()
+                : resolveTieSTVWithHistory(history, ballots, tied);
+
+            elected.insert(chosen);
+            newly.push_back(chosen);
+            remainingEligible.erase(chosen);
         }
         return newly;
     };
@@ -387,7 +421,8 @@ std::vector<std::vector<std::string>> inputBallotsByRowNumbers(const std::vector
     std::cout << "Enter ballots as comma-separated row numbers in preference order (e.g., 1,3,2).\n";
     std::cout << "Press Enter on an empty line to finish.\n";
 
-    for (int i = 1;i > 0;i++) {
+    int i = 1;
+    while (true) {
         std::cout << i << ": ";
         std::string line;
         if (!std::getline(std::cin, line)) break; // EOF
@@ -397,9 +432,11 @@ std::vector<std::vector<std::string>> inputBallotsByRowNumbers(const std::vector
         auto ballot = parseBallotFromRowNumbers(candidates, s);
         if (ballot.empty()) {
             std::cout << "(no valid selections, ballot ignored)\n";
+            ++i;
             continue;
         }
         ballots.push_back(std::move(ballot));
+        ++i;
     }
 
     std::cout << "Captured " << ballots.size() << " ballot(s).\n";
@@ -484,6 +521,7 @@ int main()
         first = false;
     }
     std::cout << "\nPress any key\n";
-	getchar();
+    char c = getchar();
+    (void)c; // Explicitly mark 'c' as used to avoid C6031 warning
     return 0;
 }

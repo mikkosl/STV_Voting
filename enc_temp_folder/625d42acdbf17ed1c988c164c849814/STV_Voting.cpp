@@ -411,7 +411,7 @@ std::vector<std::string> inputCandidateNames()
     std::vector<std::string> candidates;
     std::set<std::string> seen;
 
-    std::cout << "Enter candidate names, one per line. Press Enter on an empty line to finish.\n";
+    std::cout << "Enter candidate names, one per line. Press Enter an empty line to finish.\n";
     for (;;)
     {
         std::string line;

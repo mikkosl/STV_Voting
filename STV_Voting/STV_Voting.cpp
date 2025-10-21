@@ -453,8 +453,8 @@ int inputNumberOfSeats()
                 std::cout << "Invalid characters detected. Try again.\n";
                 continue;
             }
-            if (v <= 0 || v > 1000000) {
-                std::cout << "Seats must be between 1 and 1,000,000. Try again.\n";
+            if (v <= 1 || v > 1000000) {
+                std::cout << "Seats must be between 2 and 1,000,000. Try again.\n";
                 continue;
             }
             return static_cast<int>(v);

@@ -12,6 +12,9 @@
 #include <cmath>
 #include <iomanip>
 #include <sstream> // added
+#ifdef _WIN32
+#include <conio.h>
+#endif
 
 using namespace std;
 
@@ -410,13 +413,16 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
     for (const auto& c : allCandidates)
         if (!voteCounts.count(c)) voteCounts[c] = 0.0;
 
+    // Print quota before CSV printouts
+    std::cout << "Quota," << std::fixed << std::setprecision(2) << quota << "\n";
+
     // Track round history for §11D tie-breaks
     std::vector<std::map<std::string, double>> history;
     history.push_back(voteCounts);
 
-    // CSV header and initial snapshot (Round 1)
+    // CSV header and initial snapshot (Round 0)
     printCsvHeader();
-    int round = 1;
+    int round = 0; 
     {
         std::map<std::string, double> noneAmt;
         std::map<std::string, std::string> noneSrc;
@@ -773,7 +779,7 @@ int inputNumberOfSeats()
 {
     for (;;)
     {
-        std::cout << "Enter number of seats (positive integer): ";
+        std::cout << "Enter number of seats (positive integer above 1): ";
         std::string line;
         if (!std::getline(std::cin, line)) {
             std::cout << "Input stream closed.\n";
@@ -823,8 +829,13 @@ int main()
         std::cout << w;
         first = false;
     }
-    std::cout << "\nPress any key\n";
-    char c = getchar();
-    (void)c; // Explicitly mark 'c' as used to avoid C6031 warning
+
+#ifdef _WIN32
+    std::cout << "\nPress any key to exit...\n";
+    (void)_getch();      // does not require Enter and does not echo
+#else
+    std::cout << "\nPress Enter to exit...\n";
+    std::cin.get();      // portable fallback (requires Enter)
+#endif
     return 0;
 }

@@ -46,7 +46,109 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
 // Main loop: repeat until all seats are filled
 std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>& ballots, int seats);
 
+std::map<std::string, double> computeSurplusDistributionForLog(
+    const std::string& candidate,
+    double surplus,
+    const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& elected,
+    const std::map<std::string, double>& voteCounts);
+
 // --- Implementations ---
+
+// Print CSV header for election rounds
+void printCsvHeader()
+{
+    std::cout << "Round";
+    std::cout << ",Candidate";
+    std::cout << ",Votes";
+    // std::cout << ",Elected"; // removed from CSV
+    std::cout << ",Status";
+    std::cout << ",Transferred";
+    std::cout << ",Source";
+    std::cout << "\n";
+}
+
+// Print a CSV row for each candidate in the round, including transfers and status.
+void printCsvRound(
+    int round,
+    const std::map<std::string, double>& voteCounts,
+    const std::set<std::string>& elected,
+    const std::set<std::string>& allCandidates,
+    const std::map<std::string, double>& transferredAmounts,
+    const std::map<std::string, std::string>& recipients)
+{
+    for (const auto& cand : allCandidates) {
+        std::cout << round;
+        std::cout << "," << cand;
+        auto it = voteCounts.find(cand);
+        double votes = (it != voteCounts.end()) ? it->second : 0.0;
+        std::cout << "," << std::fixed << std::setprecision(2) << votes;
+
+        // Existing elected flag (kept for status calculation only; not printed)
+        const bool isElected = elected.count(cand) != 0;
+        // std::cout << "," << (isElected ? "Y" : ""); // removed from CSV
+
+        // Status column
+        std::string status;
+        if (isElected) {
+            status = "Elected";
+        } else if (voteCounts.find(cand) == voteCounts.end()) {
+            status = "Eliminated";
+        } else {
+            status = "Continuing";
+        }
+        std::cout << "," << status;
+
+        // Transfer info
+        auto tIt = transferredAmounts.find(cand);
+        std::cout << "," << (tIt != transferredAmounts.end() ? std::to_string(tIt->second) : "");
+        auto rIt = recipients.find(cand);
+        std::cout << "," << (rIt != recipients.end() ? rIt->second : "");
+        std::cout << "\n";
+    }
+}
+
+
+std::map<std::string, double> computeEliminationDistributionForLog(
+    const std::string& eliminated,
+    const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& elected,
+    const std::map<std::string, double>& voteCounts)
+{
+    std::map<std::string, double> result;
+
+    auto isContinuing = [&](const std::string& c) -> bool {
+        return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
+    };
+
+    for (const auto& ballot : ballots) {
+        // Find current assignment (first continuing candidate on this ballot)
+        std::string current;
+        size_t curIndex = 0;
+        for (; curIndex < ballot.size(); ++curIndex) {
+            const auto& c = ballot[curIndex];
+            if (isContinuing(c)) { current = c; break; }
+        }
+
+        // Only transfer ballots currently assigned to the eliminated candidate
+        if (current != eliminated) continue;
+
+        // Find next continuing preference after the eliminated candidate on this ballot
+        std::string next;
+        for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
+            const auto& c = ballot[j];
+            if (isContinuing(c)) { next = c; break; }
+        }
+
+        // Transfer one full vote to the next continuing candidate if present
+        if (!next.empty()) {
+            result[next] += 1.0;
+        }
+        // else: ballot exhausts; no transfer
+    }
+
+    return result;
+}
 
 // §11C(2): quota = validBallots / (seats + 1), rounded up to two decimals.
 double calculateQuota(int validBallots, int seats)
@@ -166,10 +268,74 @@ std::set<std::string> electCandidates(const std::map<std::string, double>& voteC
     return elected;
 }
 
-void transferSurplus(std::string /*candidate*/, double /*surplus*/, const std::vector<std::vector<std::string>>& /*ballots*/,
-                     std::map<std::string, double>& /*voteCounts*/, const std::set<std::string>& /*elected*/)
+void transferSurplus(std::string candidate,
+                     double surplus,
+                     const std::vector<std::vector<std::string>>& ballots,
+                     std::map<std::string, double>& voteCounts,
+                     const std::set<std::string>& elected)
 {
-    // To be implemented with full STV state (weights, last contributing batch) per §11C(4).
+    // Simplified STV surplus transfer:
+    // Distribute the elected candidate's surplus proportionally to next continuing preferences
+    // among ballots currently assigned to that candidate. Conserve total by deducting the
+    // transferred amount from the elected candidate's tally.
+
+    if (surplus <= 0.0) return;
+
+    auto candIt = voteCounts.find(candidate);
+    if (candIt == voteCounts.end()) return;
+
+    auto isContinuing = [&](const std::string& c) -> bool {
+        // Continuing = not elected and still present in voteCounts (i.e., not already eliminated)
+        return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
+    };
+
+    // Count how many ballots are currently assigned to the elected candidate
+    // and how many of those indicate each next continuing preference.
+    int assigned = 0;
+    std::map<std::string, int> nextCounts;
+
+    for (const auto& ballot : ballots) {
+        // Find current assignment on this ballot: first candidate still in the count (could be elected).
+        std::string current;
+        size_t curIndex = 0;
+        for (; curIndex < ballot.size(); ++curIndex) {
+            const auto& c = ballot[curIndex];
+            if (voteCounts.find(c) != voteCounts.end()) { // candidate is still in the tally map
+                current = c;
+                break;
+            }
+        }
+        if (current != candidate) continue; // not a ballot currently counted for the elected candidate
+
+        ++assigned;
+
+        // Find the next continuing (not elected, still in count) after the elected candidate
+        for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
+            const auto& nxt = ballot[j];
+            if (isContinuing(nxt)) {
+                nextCounts[nxt] += 1;
+                break;
+            }
+        }
+        // If none found, ballot portion exhausts; nothing to do.
+    }
+
+    if (assigned == 0) return;
+
+    // Each contributing ballot transfers this fraction of a vote
+    const double transferValue = surplus / static_cast<double>(assigned);
+
+    // Apply transfers and track total transferred to conserve totals
+    double totalTransferred = 0.0;
+    for (const auto& [rcpt, cnt] : nextCounts) {
+        const double amt = transferValue * static_cast<double>(cnt);
+        voteCounts[rcpt] += amt;
+        totalTransferred += amt;
+    }
+
+    // Deduct transferred amount from the elected candidate
+    candIt->second -= totalTransferred;
+    if (candIt->second < 0.0) candIt->second = 0.0; // guard against tiny rounding negatives
 }
 
 std::string eliminateLowestCandidate(const std::map<std::string, double>& voteCounts, const std::set<std::string>& elected)
@@ -186,10 +352,45 @@ std::string eliminateLowestCandidate(const std::map<std::string, double>& voteCo
     return lowest;
 }
 
-void transferEliminatedVotes(std::string /*eliminated*/, const std::vector<std::vector<std::string>>& /*ballots*/,
-                             std::map<std::string, double>& /*voteCounts*/, const std::set<std::string>& /*elected*/)
+void transferEliminatedVotes(std::string eliminated,
+                             const std::vector<std::vector<std::string>>& ballots,
+                             std::map<std::string, double>& voteCounts,
+                             const std::set<std::string>& elected)
 {
-    // To be implemented with full STV state (weights, equal split when no next preference) per §11A/B/C.
+    // If the eliminated candidate is not in the current count, nothing to do.
+    if (voteCounts.find(eliminated) == voteCounts.end()) return;
+
+    auto isContinuing = [&](const std::string& c) -> bool {
+        // Continuing = not elected and still present in voteCounts (i.e., not already eliminated)
+        return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
+    };
+
+    for (const auto& ballot : ballots) {
+        // Find current assignment (first continuing candidate on this ballot)
+        std::string current;
+        size_t curIndex = 0;
+        for (; curIndex < ballot.size(); ++curIndex) {
+            const auto& c = ballot[curIndex];
+            if (isContinuing(c)) { current = c; break; }
+        }
+
+        // Only transfer ballots currently assigned to the eliminated candidate
+        if (current != eliminated) continue;
+
+        // Find next continuing preference after the eliminated candidate on this ballot
+        std::string next;
+        for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
+            const auto& c = ballot[j];
+            if (isContinuing(c)) { next = c; break; }
+        }
+
+        // Transfer one full vote to the next continuing candidate if present
+        if (!next.empty()) {
+            voteCounts[next] += 1.0;
+        }
+        // else: ballot exhausts; no transfer
+    }
+    // Caller removes the eliminated candidate from voteCounts after this.
 }
 
 std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>& ballots, int seats)
@@ -212,6 +413,15 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
     // Track round history for §11D tie-breaks
     std::vector<std::map<std::string, double>> history;
     history.push_back(voteCounts);
+
+    // CSV header and initial snapshot (Round 1)
+    printCsvHeader();
+    int round = 1;
+    {
+        std::map<std::string, double> noneAmt;
+        std::map<std::string, std::string> noneSrc;
+        printCsvRound(round++, voteCounts, elected, allCandidates, noneAmt, noneSrc);
+    }
 
     // Helper: elect everyone meeting quota (but never exceed seats)
     auto electByQuota = [&]() -> std::vector<std::string>
@@ -284,11 +494,31 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
                 if (voteCounts[a] != voteCounts[b]) return voteCounts[a] > voteCounts[b];
                 return a < b;
             });
+
+            // Accumulate a per-round transfer log (amounts received by recipients, and source)
+            std::map<std::string, double> transferredAmounts;
+            std::map<std::string, std::string> recipients;
+
             for (const auto& cand : newly) {
                 const double surplus = voteCounts[cand] - quota;
-                if (surplus > 0.0)
+                if (surplus > 0.0) {
+                    // Compute distribution for logging, then perform the actual transfer.
+                    auto dist = computeSurplusDistributionForLog(cand, surplus, ballots, elected, voteCounts);
+                    for (std::map<std::string, double>::const_iterator it = dist.begin(); it != dist.end(); ++it) {
+                        const std::string& rcpt = it->first;
+                        double amt = it->second;
+                        transferredAmounts[rcpt] += amt;
+                        recipients[rcpt] = cand; // source is the elected candidate
+                    }
                     transferSurplus(cand, surplus, ballots, voteCounts, elected);
+                }
             }
+
+            // Print a CSV round showing the transfers (if any)
+            printCsvRound(round++, voteCounts, elected, allCandidates, transferredAmounts, recipients);
+
+            // Record post-surplus state for §11D history-based tie-breaks
+            history.push_back(voteCounts);
 
             forceElectIfOnlyAsManyLeft();
             if (static_cast<int>(elected.size()) >= seats) break;
@@ -321,8 +551,23 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
             ? *tied.begin()
             : resolveTieSTVWithHistory(history, ballots, tied);
 
+        // Compute elimination distribution for logging before mutating voteCounts
+        auto elimDist = computeEliminationDistributionForLog(toEliminate, ballots, elected, voteCounts);
+
+        // Transfer eliminated candidate's ballots to next continuing preferences
         transferEliminatedVotes(toEliminate, ballots, voteCounts, elected);
+
+        // Remove eliminated candidate from the tally
         voteCounts.erase(toEliminate);
+
+        // Prepare and print CSV round for elimination transfers
+        {
+            std::map<std::string, std::string> recipients;
+            for (const auto& [rcpt, _] : elimDist) {
+                recipients[rcpt] = toEliminate; // source is the eliminated candidate
+            }
+            printCsvRound(round++, voteCounts, elected, allCandidates, elimDist, recipients);
+        }
 
         // Record the state for future §11D resolutions
         history.push_back(voteCounts);
@@ -347,9 +592,67 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
             if (static_cast<int>(elected.size()) >= seats) break;
             elected.insert(cand);
         }
+
+        // Final snapshot (no transfers in fallback)
+        std::map<std::string, double> noneAmt;
+        std::map<std::string, std::string> noneSrc;
+        printCsvRound(round++, voteCounts, elected, allCandidates, noneAmt, noneSrc);
     }
 
     return elected;
+}
+
+// Computes the distribution of surplus votes for logging purposes.
+// Returns a map of recipient candidate to amount received.
+std::map<std::string, double> computeSurplusDistributionForLog(
+    const std::string& candidate,
+    double surplus,
+    const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& elected,
+    const std::map<std::string, double>& voteCounts)
+{
+    std::map<std::string, double> result;
+    if (surplus <= 0.0) return result;
+
+    auto isContinuing = [&](const std::string& c) -> bool {
+        return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
+    };
+
+    int assigned = 0;
+    std::map<std::string, int> nextCounts;
+
+    for (const auto& ballot : ballots) {
+        std::string current;
+        size_t curIndex = 0;
+        for (; curIndex < ballot.size(); ++curIndex) {
+            const auto& c = ballot[curIndex];
+            if (voteCounts.find(c) != voteCounts.end()) {
+                current = c;
+                break;
+            }
+        }
+        if (current != candidate) continue;
+
+        ++assigned;
+
+        for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
+            const auto& nxt = ballot[j];
+            if (isContinuing(nxt)) {
+                nextCounts[nxt] += 1;
+                break;
+            }
+        }
+    }
+
+    if (assigned == 0) return result;
+
+    const double transferValue = surplus / static_cast<double>(assigned);
+
+    for (const auto& [rcpt, cnt] : nextCounts) {
+        result[rcpt] = transferValue * static_cast<double>(cnt);
+    }
+
+    return result;
 }
 
 // Helper to trim leading/trailing whitespace
@@ -513,7 +816,7 @@ int main()
 
     auto winners = runMultiSeatElection(multiSeatBallots, seats);
 
-    std::cout << "Elected (" << winners.size() << "): ";
+    std::cout << "\nElected (" << winners.size() << "): ";
     bool first = true;
     for (const auto& w : winners) {
         if (!first) std::cout << ", ";

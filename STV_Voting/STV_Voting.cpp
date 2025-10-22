@@ -64,7 +64,6 @@ void printCsvHeader()
     std::cout << "Round";
     std::cout << ",Candidate";
     std::cout << ",Votes";
-    // std::cout << ",Elected"; // removed from CSV
     std::cout << ",Status";
     std::cout << ",Transferred";
     std::cout << ",Source";

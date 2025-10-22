@@ -277,10 +277,13 @@ void transferSurplus(std::string candidate,
                      std::map<std::string, double>& voteCounts,
                      const std::set<std::string>& elected)
 {
-    // Simplified STV surplus transfer:
-    // Distribute the elected candidate's surplus proportionally to next continuing preferences
-    // among ballots currently assigned to that candidate. Conserve total by deducting the
-    // transferred amount from the elected candidate's tally.
+    // §11 surplus transfer (Inclusive, unweighted per transferable ballot):
+    // Distribute exactly the surplus across ballots currently assigned to the elected
+    // candidate that have a next continuing preference. Each such ballot transfers an equal
+    // fraction: transferValue = surplus / transferableBallotsCount.
+    //
+    // This ensures the total transferred equals the surplus (subject to tiny FP rounding),
+    // and the elected candidate's tally is reduced by that same amount.
 
     if (surplus <= 0.0) return;
 
@@ -292,43 +295,44 @@ void transferSurplus(std::string candidate,
         return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
     };
 
-    // Count how many ballots are currently assigned to the elected candidate
-    // and how many of those indicate each next continuing preference.
-    int assigned = 0;
+    // Count only ballots currently assigned to 'candidate' that also have a next continuing preference.
+    int transferable = 0;
     std::map<std::string, int> nextCounts;
 
     for (const auto& ballot : ballots) {
-        // Find current assignment on this ballot: first candidate still in the count (could be elected).
+        // Current assignment = first candidate still in the tally map (could be elected)
         std::string current;
         size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
             const auto& c = ballot[curIndex];
-            if (voteCounts.find(c) != voteCounts.end()) { // candidate is still in the tally map
+            if (voteCounts.find(c) != voteCounts.end()) { // still in the tally map
                 current = c;
                 break;
             }
         }
-        if (current != candidate) continue; // not a ballot currently counted for the elected candidate
+        if (current != candidate) continue; // not assigned to the elected candidate
 
-        ++assigned;
-
-        // Find the next continuing (not elected, still in count) after the elected candidate
+        // Find next continuing (not elected, still in count) after the elected candidate
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& nxt = ballot[j];
             if (isContinuing(nxt)) {
+                ++transferable;
                 nextCounts[nxt] += 1;
                 break;
             }
         }
-        // If none found, ballot portion exhausts; nothing to do.
+        // If none found, ballot exhausts; it does not participate in surplus transfer.
     }
 
-    if (assigned == 0) return;
+    if (transferable == 0) {
+        // Nothing to transfer under §11 (no next preferences on assigned ballots).
+        return;
+    }
 
-    // Each contributing ballot transfers this fraction of a vote
-    const double transferValue = surplus / static_cast<double>(assigned);
+    // Each transferable ballot moves this fraction of a vote
+    const double transferValue = surplus / static_cast<double>(transferable);
 
-    // Apply transfers and track total transferred to conserve totals
+    // Apply transfers; track total to conserve mass
     double totalTransferred = 0.0;
     for (const auto& [rcpt, cnt] : nextCounts) {
         const double amt = transferValue * static_cast<double>(cnt);
@@ -336,7 +340,7 @@ void transferSurplus(std::string candidate,
         totalTransferred += amt;
     }
 
-    // Deduct transferred amount from the elected candidate
+    // Deduct the amount moved from the elected candidate
     candIt->second -= totalTransferred;
     if (candIt->second < 0.0) candIt->second = 0.0; // guard against tiny rounding negatives
 }
@@ -617,6 +621,8 @@ std::map<std::string, double> computeSurplusDistributionForLog(
     const std::set<std::string>& elected,
     const std::map<std::string, double>& voteCounts)
 {
+    // Mirrors §11-compliant logic in transferSurplus:
+    // Only ballots assigned to 'candidate' that have a next continuing preference are transferable.
     std::map<std::string, double> result;
     if (surplus <= 0.0) return result;
 
@@ -624,7 +630,7 @@ std::map<std::string, double> computeSurplusDistributionForLog(
         return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
     };
 
-    int assigned = 0;
+    int transferable = 0;
     std::map<std::string, int> nextCounts;
 
     for (const auto& ballot : ballots) {
@@ -639,20 +645,19 @@ std::map<std::string, double> computeSurplusDistributionForLog(
         }
         if (current != candidate) continue;
 
-        ++assigned;
-
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& nxt = ballot[j];
             if (isContinuing(nxt)) {
+                ++transferable;
                 nextCounts[nxt] += 1;
                 break;
             }
         }
     }
 
-    if (assigned == 0) return result;
+    if (transferable == 0) return result;
 
-    const double transferValue = surplus / static_cast<double>(assigned);
+    const double transferValue = surplus / static_cast<double>(transferable);
 
     for (const auto& [rcpt, cnt] : nextCounts) {
         result[rcpt] = transferValue * static_cast<double>(cnt);

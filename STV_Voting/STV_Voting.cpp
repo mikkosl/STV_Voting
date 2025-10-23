@@ -251,21 +251,37 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
     return resolveTieSTV(ballots, tiedCandidates);
 }
 
-// Placeholder implementations to keep linkage intact; core STV loop to be implemented.
 std::map<std::string, double> countFirstChoices(const std::vector<std::vector<std::string>>& ballots)
 {
     std::map<std::string, double> counts;
+
+    // Pre-initialize all candidates observed in any position to 0.0
     for (const auto& b : ballots) {
-        if (!b.empty()) counts[b.front()] += 1.0;
+        for (const auto& c : b) {
+            if (!c.empty()) counts.emplace(c, 0.0);
+        }
     }
+
+    // Count first-choice for each ballot (if any)
+    for (const auto& b : ballots) {
+        if (!b.empty() && !b.front().empty()) {
+            counts[b.front()] += 1.0;
+        }
+    }
+
     return counts;
 }
 
 std::set<std::string> electCandidates(const std::map<std::string, double>& voteCounts, double quota)
 {
     std::set<std::string> elected;
+    if (!std::isfinite(quota) || quota <= 0.0) return elected;
+
+    constexpr double eps = 1e-9; // numeric tolerance for FP comparisons
     for (const auto& [cand, votes] : voteCounts) {
-        if (votes >= quota) elected.insert(cand);
+        if (std::isfinite(votes) && (votes + eps) >= quota) {
+            elected.insert(cand);
+        }
     }
     return elected;
 }

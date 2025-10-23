@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <sstream>
 #include <limits> // <-- add this
+#include <random> // add this for drawing lots
 #ifdef _WIN32
 #include <conio.h>
 #endif
@@ -31,13 +32,11 @@ double calculateQuota(int validBallots, int seats);
 std::map<std::string, double> countFirstChoices(const std::vector<std::vector<std::string>>& ballots);
 
 // Step 3: Elect candidates who meet the quota
-std::set<std::string> electCandidates(const std::map<std::string, double>& voteCounts, double quota);
 
 // Step 4: Transfer surplus
 void transferSurplus(std::string candidate, double surplus, const std::vector<std::vector<std::string>>& ballots, std::map<std::string, double>& voteCounts, const std::set<std::string>& elected);
 
 // Step 5: Eliminate the lowest-vote candidate
-std::string eliminateLowestCandidate(const std::map<std::string, double>& voteCounts, const std::set<std::string>& elected);
 
 // Step 6: Transfer votes from the eliminated candidate
 void transferEliminatedVotes(std::string eliminated, const std::vector<std::vector<std::string>>& ballots, std::map<std::string, double>& voteCounts, const std::set<std::string>& elected);
@@ -54,78 +53,51 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
 
 // --- Implementations ---
 
+// Add this helper function near the top of the file, before its first use:
+static double floor2(double x) { return std::floor(x * 100.0) / 100.0; }
+
 // Add this helper function near the other tie-break helpers (above its first use)
 static std::string finalTiebreakPick(const std::set<std::string>& tiedCandidates)
 {
-    // Deterministic fallback: pick the lexicographically smallest candidate
     if (tiedCandidates.empty()) return {};
-    return *tiedCandidates.begin();
+
+    // Draw lots uniformly among the tied candidates
+    std::vector<std::string> pool(tiedCandidates.begin(), tiedCandidates.end());
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution<size_t> dist(0, pool.size() - 1);
+    return pool[dist(gen)];
 }
 
-// Helper: next-continuing-preference tiebreak
-std::string resolveTieNextContinuing(const std::vector<std::vector<std::string>>& ballots,
-                                     const std::set<std::string>& tiedCandidates,
-                                     const std::map<std::string, double>& voteCounts,
-                                     const std::set<std::string>& elected)
+// Add this function above its first use (e.g., above resolveTieSTVWithHistoryForElimination)
+// Original prefs, pick lowest (for elimination tiebreak)
+static std::string resolveTieSTVLeast(const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& tiedCandidates)
 {
     if (tiedCandidates.empty()) return {};
-
-    auto isContinuing = [&](const std::string& c) -> bool {
-        return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
-    };
-
-    // Precompute the max compressed length to bound rank iterations.
     size_t maxLen = 0;
-    std::vector<std::vector<std::string>> compressed;
-    compressed.reserve(ballots.size());
-    for (const auto& b : ballots) {
-        std::vector<std::string> v;
-        v.reserve(b.size());
-        for (const auto& c : b) {
-            if (isContinuing(c)) v.push_back(c);
-        }
-        maxLen = std::max(maxLen, v.size());
-        compressed.push_back(std::move(v));
-    }
-    if (maxLen <= 1) {
-        // No 2nd or further continuing preferences exist; unresolved here.
-        return {};
-    }
+    for (const auto& b : ballots) maxLen = std::max(maxLen, b.size());
+    if (maxLen == 0) return finalTiebreakPick(tiedCandidates);
 
-    // For rank = 2..maxLen (1-based), count occurrences at that rank among continuing candidates.
     for (size_t rank = 2; rank <= maxLen; ++rank) {
         std::map<std::string, int> rankCounts;
         for (const auto& c : tiedCandidates) rankCounts[c] = 0;
 
-        for (const auto& v : compressed) {
-            if (v.size() < rank) continue;
-            const std::string& candAtRank = v[rank - 1];
-            if (tiedCandidates.count(candAtRank)) {
-                rankCounts[candAtRank] += 1;
-            }
+        for (const auto& b : ballots) {
+            if (b.size() < rank) continue;
+            const std::string& candAtRank = b[rank - 1];
+            if (tiedCandidates.count(candAtRank)) rankCounts[candAtRank] += 1;
         }
 
-        // Find best at this rank
-        int best = -1;
+        int best = std::numeric_limits<int>::max();
         std::set<std::string> bestCands;
         for (const auto& [cand, cnt] : rankCounts) {
-            if (cnt > best) {
-                best = cnt;
-                bestCands.clear();
-                bestCands.insert(cand);
-            } else if (cnt == best) {
-                bestCands.insert(cand);
-            }
+            if (cnt < best) { best = cnt; bestCands.clear(); bestCands.insert(cand); }
+            else if (cnt == best) { bestCands.insert(cand); }
         }
-
-        if (bestCands.size() == 1) {
-            return *bestCands.begin();
-        }
-        // else continue to next rank
+        if (bestCands.size() == 1) return *bestCands.begin();
     }
-
-    // Still tied
-    return {};
+    return finalTiebreakPick(tiedCandidates);
 }
 
 // Helper: next-continuing-preference tiebreak (least preferred for elimination)
@@ -212,7 +184,7 @@ static std::string resolveTieSTVWithHistoryForElimination(const std::vector<std:
     }
 
     // Secondary: least next continuing preferences
-    if (auto chosen = resolveTieNextContinuingLeast(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
+    if (auto chosen = resolveTieSTVLeast(ballots, tiedCandidates); !chosen.empty()) {
         return chosen;
     }
 
@@ -383,7 +355,7 @@ double calculateQuota(int validBallots, int seats)
     return static_cast<double>(scaled) / 100.0;
 }
 
-// §11D: Tie-breaking by counting 2nd choices, then 3rd, etc. If still tied, use deterministic lexical order.
+// §11D: Tie-breaking by counting 2nd choices, then 3rd, etc. If still tied, use lot or deterministic lexical order.
 // NOTE: If caller has a known earlier phase where candidates had different totals (per §11D),
 // they should resolve using that history before calling this function.
 std::string resolveTieSTV(const std::vector<std::vector<std::string>>& ballots,
@@ -395,8 +367,8 @@ std::string resolveTieSTV(const std::vector<std::vector<std::string>>& ballots,
     size_t maxLen = 0;
     for (const auto& b : ballots) maxLen = std::max(maxLen, b.size());
     if (maxLen == 0) {
-        // No preferences at all; fall back to deterministic lexical order
-        return *tiedCandidates.begin();
+        // No preferences at all; fall back to drawing lots
+        return finalTiebreakPick(tiedCandidates);
     }
 
     // For rank = 2..maxLen, count occurrences at that exact rank.
@@ -432,8 +404,8 @@ std::string resolveTieSTV(const std::vector<std::vector<std::string>>& ballots,
         // Continue to next rank if still tied
     }
 
-    // If still tied after exhausting all ranks, resolve deterministically (lexical order).
-    return *tiedCandidates.begin();
+    // If still tied after exhausting all ranks, resolve by drawing lots
+    return finalTiebreakPick(tiedCandidates);
 }
 
 // New implementation placed near resolveTieSTV
@@ -470,7 +442,7 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
     }
 
     // §11D secondary: next continuing preferences
-    if (auto chosen = resolveTieNextContinuing(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
+    if (auto chosen = resolveTieNextContinuingLeast(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
         return chosen;
     }
 
@@ -499,106 +471,81 @@ std::map<std::string, double> countFirstChoices(const std::vector<std::vector<st
     return counts;
 }
 
-std::set<std::string> electCandidates(const std::map<std::string, double>& voteCounts, double quota)
-{
-    std::set<std::string> elected;
-    if (!std::isfinite(quota) || quota <= 0.0) return elected;
-
-    constexpr double eps = 1e-9; // numeric tolerance for FP comparisons
-    for (const auto& [cand, votes] : voteCounts) {
-        if (std::isfinite(votes) && (votes + eps) >= quota) {
-            elected.insert(cand);
-        }
-    }
-    return elected;
-}
-
 void transferSurplus(std::string candidate,
                      double surplus,
                      const std::vector<std::vector<std::string>>& ballots,
                      std::map<std::string, double>& voteCounts,
                      const std::set<std::string>& elected)
 {
-    // §11 surplus transfer (Inclusive, unweighted per transferable ballot):
-    // Distribute exactly the surplus across ballots currently assigned to the elected
-    // candidate that have a next continuing preference. Each such ballot transfers an equal
-    // fraction: transferValue = surplus / transferableBallotsCount.
-    //
-    // This ensures the total transferred equals the surplus (subject to tiny FP rounding),
-    // and the elected candidate's tally is reduced by that same amount.
-
     if (surplus <= 0.0) return;
-
     auto candIt = voteCounts.find(candidate);
     if (candIt == voteCounts.end()) return;
 
     auto isContinuing = [&](const std::string& c) -> bool {
-        // Continuing = not elected and still in voteCounts (i.e., not already eliminated)
         return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
     };
 
-    // Count only ballots currently assigned to 'candidate' that also have a next continuing preference.
-    int transferable = 0;
-    std::map<std::string, int> nextCounts;
+    // Count all ballots currently assigned to 'candidate' (considered ballots)
+    int considered = 0;
+    std::vector<size_t> assignedIdx; assignedIdx.reserve(ballots.size());
 
-    for (const auto& ballot : ballots) {
-        // Current assignment = first candidate still in the tally map (could be elected)
+    for (size_t i = 0; i < ballots.size(); ++i) {
+        const auto& ballot = ballots[i];
         std::string current;
         size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
             const auto& c = ballot[curIndex];
-            if (voteCounts.find(c) != voteCounts.end()) { // still in the tally map
-                current = c;
-                break;
-            }
+            if (voteCounts.find(c) != voteCounts.end()) { current = c; break; }
         }
-        if (current != candidate) continue; // not assigned to the elected candidate
+        if (current == candidate) { ++considered; assignedIdx.push_back(i); }
+    }
+    if (considered == 0) return;
 
-        // Find next continuing (not elected, still in count) after the elected candidate
+    // Transfer value per considered ballot, floored to 2 decimals
+    const double transferValue = floor2(surplus / static_cast<double>(considered));
+
+    // Precompute recipients (all continuing except elected and this candidate)
+    std::vector<std::string> recipients;
+    recipients.reserve(voteCounts.size());
+    for (const auto& [cand, _] : voteCounts) {
+        if (elected.count(cand) == 0 && cand != candidate) recipients.push_back(cand);
+    }
+
+    double totalTransferred = 0.0;
+    for (size_t i : assignedIdx) {
+        const auto& ballot = ballots[i];
+
+        // Find the index of 'candidate' as current assignment
+        size_t curIndex = 0;
+        for (; curIndex < ballot.size(); ++curIndex) {
+            if (ballot[curIndex] == candidate) break;
+            if (voteCounts.find(ballot[curIndex]) != voteCounts.end()) break;
+        }
+
+        // Find next continuing
+        std::string next;
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& nxt = ballot[j];
-            if (isContinuing(nxt)) {
-                ++transferable;
-                nextCounts[nxt] += 1;
-                break;
+            if (isContinuing(nxt)) { next = nxt; break; }
+        }
+
+        if (!next.empty()) {
+            voteCounts[next] += transferValue;
+            totalTransferred += transferValue;
+        } else if (!recipients.empty()) {
+            // Split this ballot's transferValue equally among remaining, floor to 2 decimals
+            const double share = floor2(transferValue / static_cast<double>(recipients.size()));
+            if (share > 0.0) {
+                for (const auto& rcpt : recipients) voteCounts[rcpt] += share;
+                totalTransferred += share * static_cast<double>(recipients.size());
             }
+            // Remainder discarded by flooring
         }
-        // If none found, ballot exhausts; it does not participate in surplus transfer.
     }
 
-    if (transferable == 0) {
-        // Nothing to transfer under §11 (no next preferences on assigned ballots).
-        return;
-    }
-
-    // Each transferable ballot moves this fraction of a vote
-    const double transferValue = surplus / static_cast<double>(transferable);
-
-    // Apply transfers; track total to conserve mass
-    double totalTransferred = 0.0;
-    for (const auto& [rcpt, cnt] : nextCounts) {
-        const double amt = transferValue * static_cast<double>(cnt);
-        voteCounts[rcpt] += amt;
-        totalTransferred += amt;
-    }
-
-    // Deduct the amount moved from the elected candidate
+    // Deduct transferred amount from elected candidate
     candIt->second -= totalTransferred;
-    if (candIt->second < 0.0) candIt->second = 0.0; // guard against tiny rounding negatives
-}
-
-std::string eliminateLowestCandidate(const std::map<std::string, double>& voteCounts, const std::set<std::string>& elected)
-{
-    std::string lowest;
-    double minVotes = std::numeric_limits<double>::infinity();
-    for (const auto& [cand, votes] : voteCounts) {
-        if (elected.count(cand)) continue;
-        if (votes < minVotes || (votes == minVotes && cand < lowest)) {
-            minVotes = votes;
-            lowest = cand;
-        }
-    }
-    return lowest;
+    if (candIt->second < 0.0) candIt->second = 0.0;
 }
 
 void transferEliminatedVotes(std::string eliminated,
@@ -606,40 +553,48 @@ void transferEliminatedVotes(std::string eliminated,
                              std::map<std::string, double>& voteCounts,
                              const std::set<std::string>& elected)
 {
-    // If the eliminated candidate is not in the current count, nothing to do.
     if (voteCounts.find(eliminated) == voteCounts.end()) return;
 
     auto isContinuing = [&](const std::string& c) -> bool {
-        // Continuing = not elected and still present in voteCounts (i.e., not already eliminated)
         return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
     };
 
+    // Precompute current continuing recipients (excluding elected and eliminated)
+    std::vector<std::string> recipients;
+    recipients.reserve(voteCounts.size());
+    for (const auto& [cand, _] : voteCounts) {
+        if (cand != eliminated && elected.count(cand) == 0) recipients.push_back(cand);
+    }
+
     for (const auto& ballot : ballots) {
-        // Find current assignment (first continuing candidate on this ballot)
+        // Find current assignment
         std::string current;
         size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
             const auto& c = ballot[curIndex];
-            if (isContinuing(c)) { current = c; break; }
+            if (isContinuing(c) || c == eliminated) { current = c; break; }
         }
-
-        // Only transfer ballots currently assigned to the eliminated candidate
         if (current != eliminated) continue;
 
-        // Find next continuing preference after the eliminated candidate on this ballot
+        // Find next continuing preference
         std::string next;
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& c = ballot[j];
             if (isContinuing(c)) { next = c; break; }
         }
 
-        // Transfer one full vote to the next continuing candidate if present
         if (!next.empty()) {
-            voteCounts[next] += 1.0;
+            voteCounts[next] += 1.0; // full value
+        } else if (!recipients.empty()) {
+            // Split equally among all remaining, floor to 2 decimals
+            const double share = floor2(1.0 / static_cast<double>(recipients.size()));
+            if (share > 0.0) {
+                for (const auto& rcpt : recipients) voteCounts[rcpt] += share;
+            }
+            // Remainder is discarded per "alaspäin pyöristäen"
         }
-        // else: ballot exhausts; no transfer
     }
-    // Caller removes the eliminated candidate from voteCounts after this.
+    // Caller removes eliminated after this
 }
 
 std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>& ballots, int seats)
@@ -853,7 +808,6 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
 
     return elected;
 }
-
 
 // Helper to trim leading/trailing whitespace
 static std::string trim(const std::string& s)

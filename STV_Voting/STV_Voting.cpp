@@ -253,28 +253,28 @@ void printCsvHeader()
     std::cout << ",Votes";
     std::cout << ",Status";
     std::cout << ",Transferred";
-    std::cout << ",Source";
+    std::cout << ",Sources";
     std::cout << "\n";
 }
 
-// Print a CSV row for each candidate in the round, including transfers and status.
+// Print a CSV row for each candidate in the round, including transfers and source breakdowns.
 void printCsvRound(
     int round,
     const std::map<std::string, double>& voteCounts,
     const std::set<std::string>& elected,
     const std::set<std::string>& allCandidates,
     const std::map<std::string, double>& transferredAmounts,
-    const std::map<std::string, std::string>& recipients)
+    const std::map<std::string, std::vector<std::pair<std::string, double>>>& transferSources)
 {
     for (const auto& cand : allCandidates) {
         std::cout << round;
         std::cout << "," << cand;
+
         auto it = voteCounts.find(cand);
         double votes = (it != voteCounts.end()) ? it->second : 0.0;
         std::cout << "," << std::fixed << std::setprecision(2) << votes;
 
         const bool isElected = elected.count(cand) != 0;
-
         std::string status;
         if (isElected) {
             status = "Elected";
@@ -285,23 +285,26 @@ void printCsvRound(
         }
         std::cout << "," << status;
 
-        // Transferred amount: print using the same 2-decimal formatting as votes
+        // Transferred amount (total received this round)
         std::cout << ",";
         auto tIt = transferredAmounts.find(cand);
         if (tIt != transferredAmounts.end()) {
             std::cout << std::fixed << std::setprecision(2) << tIt->second;
         }
 
-        // Source candidate (string)
+        // All sources with per-source amounts: e.g., Alice(1.20); Bob(0.80)
         std::cout << ",";
-        auto rIt = recipients.find(cand);
-        if (rIt != recipients.end()) {
-            std::cout << rIt->second;
+        auto sIt = transferSources.find(cand);
+        if (sIt != transferSources.end()) {
+            const auto& items = sIt->second;
+            for (size_t i = 0; i < items.size(); ++i) {
+                const auto& src = items[i];
+                std::cout << src.first << "(" << std::fixed << std::setprecision(2) << src.second << ")";
+                if (i + 1 < items.size()) std::cout << "; ";
+            }
         }
         std::cout << "\n";
     }
-
-    // Empty line between rounds
     std::cout << "\n";
 }
 
@@ -646,7 +649,7 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
     int round = 0; 
     {
         std::map<std::string, double> noneAmt;
-        std::map<std::string, std::string> noneSrc;
+        std::map<std::string, std::vector<std::pair<std::string, double>>> noneSrc;
         printCsvRound(round++, voteCounts, elected, allCandidates, noneAmt, noneSrc);
     }
 
@@ -722,27 +725,26 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
                 return a < b;
             });
 
-            // Accumulate a per-round transfer log (amounts received by recipients, and source)
+            // Accumulate a per-round transfer log (amounts received by recipients, and all sources)
             std::map<std::string, double> transferredAmounts;
-            std::map<std::string, std::string> recipients;
+            std::map<std::string, std::vector<std::pair<std::string, double>>> sourceBreakdown;
 
             for (const auto& cand : newly) {
                 const double surplus = voteCounts[cand] - quota;
                 if (surplus > 0.0) {
-                    // Compute distribution for logging, then perform the actual transfer.
                     auto dist = computeSurplusDistributionForLog(cand, surplus, ballots, elected, voteCounts);
                     for (std::map<std::string, double>::const_iterator it = dist.begin(); it != dist.end(); ++it) {
                         const std::string& rcpt = it->first;
                         double amt = it->second;
                         transferredAmounts[rcpt] += amt;
-                        recipients[rcpt] = cand; // source is the elected candidate
+                        sourceBreakdown[rcpt].push_back(std::make_pair(cand, amt));
                     }
                     transferSurplus(cand, surplus, ballots, voteCounts, elected);
                 }
             }
 
             // Print a CSV round showing the transfers (if any)
-            printCsvRound(round++, voteCounts, elected, allCandidates, transferredAmounts, recipients);
+            printCsvRound(round++, voteCounts, elected, allCandidates, transferredAmounts, sourceBreakdown);
 
             // Record post-surplus state for §11D history-based tie-breaks
             history.push_back(voteCounts);
@@ -789,11 +791,13 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
 
         // Prepare and print CSV round for elimination transfers
         {
-            std::map<std::string, std::string> recipients;
-            for (const auto& [rcpt, _] : elimDist) {
-                recipients[rcpt] = toEliminate; // source is the eliminated candidate
+            std::map<std::string, std::vector<std::pair<std::string, double>>> sources;
+            for (const auto& kv : elimDist) {
+                const std::string& rcpt = kv.first;
+                double amt = kv.second;
+                sources[rcpt].push_back(std::make_pair(toEliminate, amt));
             }
-            printCsvRound(round++, voteCounts, elected, allCandidates, elimDist, recipients);
+            printCsvRound(round++, voteCounts, elected, allCandidates, elimDist, sources);
         }
 
         // Record the state for future §11D resolutions
@@ -833,7 +837,7 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
 
         // Final snapshot (no transfers in fallback)
         std::map<std::string, double> noneAmt;
-        std::map<std::string, std::string> noneSrc;
+        std::map<std::string, std::vector<std::pair<std::string, double>>> noneSrc;
         printCsvRound(round++, voteCounts, elected, allCandidates, noneAmt, noneSrc);
     }
 

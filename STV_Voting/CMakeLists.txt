@@ -9,4 +9,8 @@ if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET STV_Voting PROPERTY CXX_STANDARD 20)
 endif()
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # TODO: Add tests and install targets if needed.

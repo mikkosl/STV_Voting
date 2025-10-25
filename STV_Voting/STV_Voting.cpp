@@ -300,6 +300,9 @@ void printCsvRound(
         }
         std::cout << "\n";
     }
+
+    // Empty line between rounds
+    std::cout << "\n";
 }
 
 // Add this function above its first use (e.g., above runMultiSeatElection)

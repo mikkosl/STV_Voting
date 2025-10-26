@@ -1017,50 +1017,57 @@ int inputNumberOfSeats()
 
 int main()
 {
-    std::vector<std::vector<std::string>> multiSeatBallots; 
-    std::vector<std::string> candidates;
-    int seats;
-
-    candidates = inputCandidateNames();
-    seats = inputNumberOfSeats();
-    multiSeatBallots = inputBallotsByRowNumbers(candidates);
-
-    auto winners = runMultiSeatElection(multiSeatBallots, seats);
-
-    std::cout << "\nElected (" << winners.size() << "): ";
-    bool first = true;
-    for (const auto& w : winners) {
-        if (!first) std::cout << ", ";
-        std::cout << w;
-        first = false;
-    }
-
-    // Prompt until we get a clear Y or N
     for (;;)
     {
-        std::cout << "\n\nRun a new election (Y/N)?\n";
-        char again = 'N';
+        std::vector<std::vector<std::string>> multiSeatBallots; 
+        std::vector<std::string> candidates;
+        int seats;
+
+        candidates = inputCandidateNames();
+        seats = inputNumberOfSeats();
+        multiSeatBallots = inputBallotsByRowNumbers(candidates);
+
+        auto winners = runMultiSeatElection(multiSeatBallots, seats);
+
+        std::cout << "\nElected (" << winners.size() << "): ";
+        bool first = true;
+        for (const auto& w : winners) {
+            if (!first) std::cout << ", ";
+            std::cout << w;
+            first = false;
+        }
+
+        // Prompt until we get a clear Y or N
+        bool runAgain = false;
+        for (;;)
+        {
+            std::cout << "\n\nRun a new election (Y/N)?\n";
+            char again = 'N';
 #ifdef _WIN32
-        again = _getch(); // single key, no Enter needed
+            again = _getch(); // single key, no Enter needed
 #else
-        std::string line;
-        if (!std::getline(std::cin, line)) return 0;
-        // take first non-space char if present
-        again = 0;
-        for (char ch : line) {
-            if (!std::isspace(static_cast<unsigned char>(ch))) { again = ch; break; }
-        }
+            std::string line;
+            if (!std::getline(std::cin, line)) return 0;
+            // take first non-space char if present
+            again = 0;
+            for (char ch : line) {
+                if (!std::isspace(static_cast<unsigned char>(ch))) { again = ch; break; }
+            }
 #endif
-        if (std::toupper(static_cast<unsigned char>(again)) == 'Y') {
-            std::cout << "\n\n";
-            break; // run another election (outer loop continues)
+            if (std::toupper(static_cast<unsigned char>(again)) == 'Y') {
+                std::cout << "\n\n";
+                runAgain = true;
+                break; // rerun the entire workflow
+            }
+            else if (std::toupper(static_cast<unsigned char>(again)) == 'N') {
+                return 0; // exit program
+            }
+            else {
+                std::cout << "Unrecognized input.\n";
+            }
         }
-        else if (std::toupper(static_cast<unsigned char>(again)) == 'N') {
-            return 0; // exit program
-        }
-        else {
-            std::cout << "Unrecognized input.\n";
-        }
+
+        if (!runAgain) break; // safety
     }
 }
 

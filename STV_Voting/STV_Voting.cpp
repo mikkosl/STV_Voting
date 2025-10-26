@@ -45,8 +45,6 @@ void transferSurplus(std::string candidate, double surplus, double quota,
 void transferEliminatedVotes(std::string eliminated, const std::vector<std::vector<std::string>>& ballots, std::map<std::string, double>& voteCounts, const std::set<std::string>& elected);
 
 // Step 7: Resolve ties per §11D
-std::string resolveTieSTV(const std::vector<std::vector<std::string>>& ballots, const std::set<std::string>& tiedCandidates);
-
 // Tie-breaking with round history (updated signature to accept current state)
 std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, double>>& history,
                                      const std::vector<std::vector<std::string>>& ballots,
@@ -124,37 +122,6 @@ static std::string resolveTieNextContinuing(const std::vector<std::vector<std::s
         // else continue deeper
     }
     return {};
-}
-
-// Add this function above its first use (e.g., above resolveTieSTVWithHistoryForElimination)
-// Original prefs, pick lowest (for elimination tiebreak)
-static std::string resolveTieSTVLeast(const std::vector<std::vector<std::string>>& ballots,
-    const std::set<std::string>& tiedCandidates)
-{
-    if (tiedCandidates.empty()) return {};
-    size_t maxLen = 0;
-    for (const auto& b : ballots) maxLen = std::max(maxLen, b.size());
-    if (maxLen == 0) return finalTiebreakPick(tiedCandidates);
-
-    for (size_t rank = 2; rank <= maxLen; ++rank) {
-        std::map<std::string, int> rankCounts;
-        for (const auto& c : tiedCandidates) rankCounts[c] = 0;
-
-        for (const auto& b : ballots) {
-            if (b.size() < rank) continue;
-            const std::string& candAtRank = b[rank - 1];
-            if (tiedCandidates.count(candAtRank)) rankCounts[candAtRank] += 1;
-        }
-
-        int best = std::numeric_limits<int>::max();
-        std::set<std::string> bestCands;
-        for (const auto& [cand, cnt] : rankCounts) {
-            if (cnt < best) { best = cnt; bestCands.clear(); bestCands.insert(cand); }
-            else if (cnt == best) { bestCands.insert(cand); }
-        }
-        if (bestCands.size() == 1) return *bestCands.begin();
-    }
-    return finalTiebreakPick(tiedCandidates);
 }
 
 // Helper: next-continuing-preference tiebreak (least preferred for elimination)
@@ -431,60 +398,7 @@ double calculateQuota(int validBallots, int seats)
     return static_cast<double>(scaled) / 100.0;
 }
 
-// §11D: Tie-breaking by counting 2nd choices, then 3rd, etc. If still tied, use lot or deterministic lexical order.
-// NOTE: If caller has a known earlier phase where candidates had different totals (per §11D),
-// they should resolve using that history before calling this function.
-std::string resolveTieSTV(const std::vector<std::vector<std::string>>& ballots,
-                          const std::set<std::string>& tiedCandidates)
-{
-    if (tiedCandidates.empty()) return {};
-
-    // Compute maximum ranking length present
-    size_t maxLen = 0;
-    for (const auto& b : ballots) maxLen = std::max(maxLen, b.size());
-    if (maxLen == 0) {
-        // No preferences at all; fall back to drawing lots
-        return finalTiebreakPick(tiedCandidates);
-    }
-
-    // For rank = 2..maxLen, count occurrences at that exact rank.
-    for (size_t rank = 2; rank <= maxLen; ++rank) {
-        std::map<std::string, int> rankCounts;
-        for (const auto& c : tiedCandidates) rankCounts[c] = 0;
-
-        for (const auto& b : ballots) {
-            if (b.size() < rank) continue;
-            const std::string& candAtRank = b[rank - 1]; // 1-based rank -> index
-            if (tiedCandidates.count(candAtRank)) {
-                rankCounts[candAtRank] += 1;
-            }
-        }
-
-        // Find the candidate(s) with highest count at this rank
-        int best = -1;
-        std::vector<std::string> bestCands;
-        for (const auto& [cand, cnt] : rankCounts) {
-            if (cnt > best) {
-                best = cnt;
-                bestCands.clear();
-                bestCands.push_back(cand);
-            } else if (cnt == best) {
-                bestCands.push_back(cand);
-            }
-        }
-
-        if (bestCands.size() == 1) {
-            return bestCands.front();
-        }
-
-        // Continue to next rank if still tied
-    }
-
-    // If still tied after exhausting all ranks, resolve by drawing lots
-    return finalTiebreakPick(tiedCandidates);
-}
-
-// New implementation placed near resolveTieSTV
+// New implementation
 std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, double>>& history,
                                      const std::vector<std::vector<std::string>>& ballots,
                                      const std::set<std::string>& tiedCandidates,
@@ -940,43 +854,6 @@ static ParseBallotResult parseBallotFromRowNumbersWithValidation(
         }
     }
     return res;
-}
-
-// Parse a single ranked ballot from a comma-separated string of row numbers.
-std::vector<std::string> parseBallotFromRowNumbers(const std::vector<std::string>& candidates,
-                                                   const std::string& line)
-{
-    std::vector<std::string> ballot;
-    if (candidates.empty()) return ballot;
-
-    std::set<size_t> used; // to prevent duplicates
-    std::stringstream ss(line);
-    std::string token;
-    while (std::getline(ss, token, ',')) {
-        const std::string t = trim(token);
-        if (t.empty()) continue;
-
-        try {
-            size_t idxPos = 0;
-            long long val = std::stoll(t, &idxPos, 10);
-            if (idxPos != t.size()) continue; // trailing characters
-            if (val <= 0) continue;           // require 1-based positive
-            size_t oneBased = static_cast<size_t>(val);
-            if (oneBased == 0 || oneBased > candidates.size()) {
-                std::cout << "Ignoring out-of-range index: " << t << "\n";
-                continue;
-            }
-            size_t zeroBased = oneBased - 1;
-            if (used.insert(zeroBased).second) {
-                ballot.push_back(candidates[zeroBased]);
-            } else {
-                std::cout << "Ignoring duplicate index: " << t << "\n";
-            }
-        } catch (const std::exception&) {
-            std::cout << "Ignoring invalid token: " << t << "\n";
-        }
-    }
-    return ballot;
 }
 
 // Input multiple ballots, one per line as comma-separated row numbers.

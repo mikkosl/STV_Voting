@@ -559,6 +559,8 @@ void transferEliminatedVotes(std::string eliminated,
 std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>& ballots, int seats)
 {
     std::set<std::string> elected;
+    std::set<std::string> pendingSurplus; // winners elected via elimination, awaiting surplus transfer
+
     if (seats <= 0 || ballots.empty()) return elected;
 
     // Collect all candidates from ballots
@@ -652,6 +654,60 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
 
     // Main loop
     while (static_cast<int>(elected.size()) < seats) {
+
+        // 0) Transfer any pending surpluses from winners elected in a prior elimination round
+        if (!pendingSurplus.empty()) {
+            std::vector<std::string> toProcess;
+            toProcess.reserve(pendingSurplus.size());
+            for (const auto& c : pendingSurplus) {
+                if ((voteCounts[c] - quota) > kEps) toProcess.push_back(c);
+            }
+
+            if (!toProcess.empty()) {
+                // Process in descending vote order, then by name
+                std::sort(toProcess.begin(), toProcess.end(), [&](const std::string& a, const std::string& b) {
+                    if (std::abs(voteCounts[a] - voteCounts[b]) > kEps) return voteCounts[a] > voteCounts[b];
+                    return a < b;
+                });
+
+                // Aggregate per-round log
+                std::map<std::string, double> transferredAmounts;
+                std::map<std::string, std::vector<std::pair<std::string, double>>> sourceBreakdown;
+
+                for (const auto& cand : toProcess) {
+                    const double surplus = voteCounts[cand] - quota;
+                    if (surplus <= 0.0) continue;
+
+                    auto dist = computeSurplusDistributionForLog(cand, surplus, ballots, elected, voteCounts);
+                    for (auto it = dist.begin(); it != dist.end(); ++it) {
+                        const std::string& rcpt = it->first;
+                        double amt = it->second;
+                        transferredAmounts[rcpt] += amt;
+                        sourceBreakdown[rcpt].push_back(std::make_pair(cand, amt));
+                    }
+                    transferSurplus(cand, surplus, quota, ballots, voteCounts, elected);
+                }
+
+                // Print a round for these surplus transfers
+                printCsvRound(round++, voteCounts, elected, allCandidates, transferredAmounts, sourceBreakdown);
+
+                // Record state for §11D history
+                history.push_back(voteCounts);
+
+                // Remove processed from pendingSurplus
+                for (const auto& c : toProcess) pendingSurplus.erase(c);
+
+                forceElectIfOnlyAsManyLeft();
+                if (static_cast<int>(elected.size()) >= seats) break;
+
+                // After handling pending surplus, restart loop to evaluate new elections
+                continue;
+            }
+
+            // If nothing had positive surplus, clear the pending set
+            pendingSurplus.clear();
+        }
+
         // 1) Elect all who reach quota
         auto newly = electByQuota();
         if (!newly.empty()) {
@@ -725,6 +781,60 @@ for (const auto& cand : newly) {
 
         // Remove eliminated candidate from the tally
         voteCounts.erase(toEliminate);
+
+        // Track who gets elected due to this elimination (for display clamping only)
+        std::vector<std::string> electedThisElim;
+
+        // Immediately lock candidates who now meet quota due to this elimination transfer.
+        // Do not transfer their surplus here; that will occur at the start of the next loop iteration.
+        {
+            std::vector<std::string> eligibleNow;
+            for (const auto& [cand, v] : voteCounts) {
+                if (!elected.count(cand) && (v + kEps) >= quota) {
+                    eligibleNow.push_back(cand);
+                }
+            }
+
+            if (!eligibleNow.empty()) {
+                int seatsLeft = seats - static_cast<int>(elected.size());
+                if (static_cast<int>(eligibleNow.size()) <= seatsLeft) {
+                    for (const auto& c : eligibleNow) {
+                        elected.insert(c);
+                        electedThisElim.push_back(c); // record for display clamp
+                        if ((voteCounts[c] - quota) > kEps) pendingSurplus.insert(c);
+                    }
+                } else {
+                    // More eligible than seats left — select deterministically
+                    std::set<std::string> remainingEligible(eligibleNow.begin(), eligibleNow.end());
+                    for (int i = 0; i < seatsLeft && !remainingEligible.empty(); ++i) {
+                        double bestVotes = -std::numeric_limits<double>::infinity();
+                        for (const auto& c : remainingEligible) {
+                            bestVotes = std::max(bestVotes, voteCounts[c]);
+                        }
+                        std::set<std::string> tied;
+                        for (const auto& c : remainingEligible) {
+                            if (std::abs(voteCounts[c] - bestVotes) <= kEps) tied.insert(c);
+                        }
+                        std::string chosen = (tied.size() == 1)
+                            ? *tied.begin()
+                            : resolveTieSTVWithHistory(history, ballots, tied, voteCounts, elected);
+                        elected.insert(chosen);
+                        electedThisElim.push_back(chosen); // record for display clamp
+                        if ((voteCounts[chosen] - quota) > kEps) pendingSurplus.insert(chosen);
+                        remainingEligible.erase(chosen);
+                    }
+                    // ... (inside runMultiSeatElection, after elimination and after electedThisElim is populated)
+                    std::map<std::string, double> displayCounts = voteCounts;
+                    for (const auto& c : electedThisElim) {
+                        auto it = displayCounts.find(c);
+                        if (it != displayCounts.end() && it->second > quota) {
+                            it->second = quota;
+                        }
+                    }
+                
+                }
+            }
+        }
 
         // Prepare and print CSV round for elimination transfers
         {

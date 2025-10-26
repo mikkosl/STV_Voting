@@ -803,9 +803,6 @@ for (const auto& cand : newly) {
         // Remove eliminated candidate from the tally
         voteCounts.erase(toEliminate);
 
-        // Track who gets elected due to this elimination (for display clamping only)
-        std::vector<std::string> electedThisElim;
-
         // Immediately lock candidates who now meet quota due to this elimination transfer.
         // Do not transfer their surplus here; that will occur at the start of the next loop iteration.
         {
@@ -821,7 +818,6 @@ for (const auto& cand : newly) {
                 if (static_cast<int>(eligibleNow.size()) <= seatsLeft) {
                     for (const auto& c : eligibleNow) {
                         elected.insert(c);
-                        electedThisElim.push_back(c); // record for display clamp
                         if ((voteCounts[c] - quota) > kEps) pendingSurplus.insert(c);
                     }
                 } else {
@@ -840,19 +836,9 @@ for (const auto& cand : newly) {
                             ? *tied.begin()
                             : resolveTieSTVWithHistory(history, ballots, tied, voteCounts, elected);
                         elected.insert(chosen);
-                        electedThisElim.push_back(chosen); // record for display clamp
                         if ((voteCounts[chosen] - quota) > kEps) pendingSurplus.insert(chosen);
                         remainingEligible.erase(chosen);
                     }
-                    // ... (inside runMultiSeatElection, after elimination and after electedThisElim is populated)
-                    std::map<std::string, double> displayCounts = voteCounts;
-                    for (const auto& c : electedThisElim) {
-                        auto it = displayCounts.find(c);
-                        if (it != displayCounts.end() && it->second > quota) {
-                            it->second = quota;
-                        }
-                    }
-                
                 }
             }
         }

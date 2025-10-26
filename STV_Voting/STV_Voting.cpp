@@ -1013,12 +1013,32 @@ int main()
         first = false;
     }
 
+    // Prompt until we get a clear Y or N
+    for (;;)
+    {
+        std::cout << "\n\nRun a new election (Y/N)?\n";
+        char again = 'N';
 #ifdef _WIN32
-    std::cout << "\nPress any key to exit...\n";
-    (void)_getch();      // does not require Enter and does not echo
+        again = _getch(); // single key, no Enter needed
 #else
-    std::cout << "\nPress Enter to exit...\n";
-    std::cin.get();      // portable fallback (requires Enter)
+        std::string line;
+        if (!std::getline(std::cin, line)) return 0;
+        // take first non-space char if present
+        again = 0;
+        for (char ch : line) {
+            if (!std::isspace(static_cast<unsigned char>(ch))) { again = ch; break; }
+        }
 #endif
-    return 0;
+        if (std::toupper(static_cast<unsigned char>(again)) == 'Y') {
+            std::cout << "\n\n";
+            break; // run another election (outer loop continues)
+        }
+        else if (std::toupper(static_cast<unsigned char>(again)) == 'N') {
+            return 0; // exit program
+        }
+        else {
+            std::cout << "Unrecognized input.\n";
+        }
+    }
 }
+

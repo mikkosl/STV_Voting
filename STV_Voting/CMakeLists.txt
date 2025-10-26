@@ -1,4 +1,7 @@
-﻿# CMakeList.txt : CMake project for STV_Voting, include source and define
+﻿cmake_minimum_required(VERSION 3.12)
+project(STV_Voting LANGUAGES CXX)
+
+# CMakeList.txt : CMake project for STV_Voting, include source and define
 # project specific logic here.
 #
 

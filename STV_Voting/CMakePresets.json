@@ -1,0 +1,19 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "x64-Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/x64-Debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" },
+      "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "architecture": "x64" } }
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/x64-Release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
+      "vendor": { "microsoft.com/VisualStudioSettings/CMake/1.0": { "architecture": "x64" } }
+    }
+  ]
+}

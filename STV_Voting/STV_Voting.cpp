@@ -34,7 +34,10 @@ std::map<std::string, double> countFirstChoices(const std::vector<std::vector<st
 // Step 3: Elect candidates who meet the quota
 
 // Step 4: Transfer surplus
-void transferSurplus(std::string candidate, double surplus, const std::vector<std::vector<std::string>>& ballots, std::map<std::string, double>& voteCounts, const std::set<std::string>& elected);
+void transferSurplus(std::string candidate, double surplus, double quota,
+                     const std::vector<std::vector<std::string>>& ballots,
+                     std::map<std::string, double>& voteCounts,
+                     const std::set<std::string>& elected);
 
 // Step 5: Eliminate the lowest-vote candidate
 
@@ -541,6 +544,7 @@ std::map<std::string, double> countFirstChoices(const std::vector<std::vector<st
 
 void transferSurplus(std::string candidate,
                      double surplus,
+                     double quota,
                      const std::vector<std::vector<std::string>>& ballots,
                      std::map<std::string, double>& voteCounts,
                      const std::set<std::string>& elected)
@@ -553,12 +557,10 @@ void transferSurplus(std::string candidate,
         return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
     };
 
-    // Collect next continuing recipients for ballots currently assigned to 'candidate'
     std::vector<std::string> nextRecipients;
     nextRecipients.reserve(ballots.size());
 
     for (const auto& ballot : ballots) {
-        // Find current assignment
         std::string current;
         size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
@@ -567,18 +569,15 @@ void transferSurplus(std::string candidate,
         }
         if (current != candidate) continue;
 
-        // Find next continuing preference
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& nxt = ballot[j];
             if (isContinuing(nxt)) { nextRecipients.push_back(nxt); break; }
         }
-        // If none, ballot exhausts — do not redistribute
     }
 
     const int transferable = static_cast<int>(nextRecipients.size());
     if (transferable == 0) return;
 
-    // Transfer value per transferable ballot, floored to 2 decimals
     const double transferValue = floor2(surplus / static_cast<double>(transferable));
 
     double totalTransferred = 0.0;
@@ -587,9 +586,10 @@ void transferSurplus(std::string candidate,
         totalTransferred += transferValue;
     }
 
-    // Deduct transferred amount from elected candidate
+    // Deduct and lock the elected candidate to quota (drop rounding residue)
     candIt->second -= totalTransferred;
     if (candIt->second < 0.0) candIt->second = 0.0;
+    if (candIt->second > quota) candIt->second = quota;
 }
 
 void transferEliminatedVotes(std::string eliminated,
@@ -751,19 +751,20 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
             std::map<std::string, double> transferredAmounts;
             std::map<std::string, std::vector<std::pair<std::string, double>>> sourceBreakdown;
 
-            for (const auto& cand : newly) {
-                const double surplus = voteCounts[cand] - quota;
-                if (surplus > 0.0) {
-                    auto dist = computeSurplusDistributionForLog(cand, surplus, ballots, elected, voteCounts);
-                    for (std::map<std::string, double>::const_iterator it = dist.begin(); it != dist.end(); ++it) {
-                        const std::string& rcpt = it->first;
-                        double amt = it->second;
-                        transferredAmounts[rcpt] += amt;
-                        sourceBreakdown[rcpt].push_back(std::make_pair(cand, amt));
-                    }
-                    transferSurplus(cand, surplus, ballots, voteCounts, elected);
-                }
-            }
+            // in runMultiSeatElection, where surplus is processed
+for (const auto& cand : newly) {
+    const double surplus = voteCounts[cand] - quota;
+    if (surplus > 0.0) {
+        auto dist = computeSurplusDistributionForLog(cand, surplus, ballots, elected, voteCounts);
+        for (std::map<std::string, double>::const_iterator it = dist.begin(); it != dist.end(); ++it) {
+            const std::string& rcpt = it->first;
+            double amt = it->second;
+            transferredAmounts[rcpt] += amt;
+            sourceBreakdown[rcpt].push_back(std::make_pair(cand, amt));
+        }
+        transferSurplus(cand, surplus, quota, ballots, voteCounts, elected);
+    }
+}
 
             // Print a CSV round showing the transfers (if any)
             printCsvRound(round++, voteCounts, elected, allCandidates, transferredAmounts, sourceBreakdown);

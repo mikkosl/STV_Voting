@@ -373,34 +373,42 @@ std::map<std::string, double> computeEliminationDistributionForLog(
 {
     std::map<std::string, double> result;
 
+    // A candidate is "continuing" if not elected and still present in voteCounts
     auto isContinuing = [&](const std::string& c) -> bool {
         return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
     };
 
+    // Collect next continuing recipients for ballots currently assigned to the eliminated candidate
+    std::vector<std::string> nextRecipients;
+    nextRecipients.reserve(ballots.size());
+
     for (const auto& ballot : ballots) {
-        // Find current assignment (first continuing candidate on this ballot)
+        // Find current assignment: first candidate who is continuing OR the eliminated one
         std::string current;
         size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
             const auto& c = ballot[curIndex];
-            if (isContinuing(c)) { current = c; break; }
+            if (isContinuing(c) || c == eliminated) { current = c; break; }
         }
-
-        // Only transfer ballots currently assigned to the eliminated candidate
         if (current != eliminated) continue;
 
-        // Find next continuing preference after the eliminated candidate on this ballot
-        std::string next;
+        // Find next continuing preference after the eliminated candidate
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& c = ballot[j];
-            if (isContinuing(c)) { next = c; break; }
+            if (isContinuing(c)) { nextRecipients.push_back(c); break; }
         }
+        // If none, ballot exhausts — no transfer
+    }
 
-        // Transfer one full vote to the next continuing candidate if present
-        if (!next.empty()) {
-            result[next] += 1.0;
-        }
-        // else: ballot exhausts; no transfer
+    const int transferable = static_cast<int>(nextRecipients.size());
+    if (transferable == 0) return result;
+
+    // Transfer each ballot at the eliminated candidate's current per-ballot value (2-decimal floor)
+    const double eliminatedTotal = voteCounts.count(eliminated) ? voteCounts.at(eliminated) : 0.0;
+    const double perBallot = floor2(eliminatedTotal / static_cast<double>(transferable));
+
+    for (const auto& rcpt : nextRecipients) {
+        result[rcpt] += perBallot;
     }
 
     return result;
@@ -595,8 +603,12 @@ void transferEliminatedVotes(std::string eliminated,
         return elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end();
     };
 
+    // Gather next continuing recipients for ballots currently assigned to the eliminated candidate
+    std::vector<std::string> nextRecipients;
+    nextRecipients.reserve(ballots.size());
+
     for (const auto& ballot : ballots) {
-        // Find current assignment
+        // Find current assignment: first continuing OR the eliminated one
         std::string current;
         size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
@@ -605,19 +617,29 @@ void transferEliminatedVotes(std::string eliminated,
         }
         if (current != eliminated) continue;
 
-        // Find next continuing preference
-        std::string next;
+        // Find next continuing preference to receive transfer
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& c = ballot[j];
-            if (isContinuing(c)) { next = c; break; }
+            if (isContinuing(c)) { nextRecipients.push_back(c); break; }
         }
-
-        if (!next.empty()) {
-            voteCounts[next] += 1.0; // full value
-        }
-        // else: ballot exhausts; no redistribution
+        // If none, ballot exhausts
     }
-    // Caller removes eliminated after this
+
+    const int transferable = static_cast<int>(nextRecipients.size());
+    if (transferable == 0) return;
+
+    // Per-ballot value = eliminated total divided by number of transferable ballots, floored to 2 decimals
+    const double eliminatedTotal = voteCounts[eliminated];
+    const double perBallot = floor2(eliminatedTotal / static_cast<double>(transferable));
+
+    double totalTransferred = 0.0;
+    for (const auto& rcpt : nextRecipients) {
+        voteCounts[rcpt] += perBallot;
+        totalTransferred += perBallot;
+    }
+
+    // Note: caller erases the eliminated candidate from voteCounts.
+    // Any tiny rounding remainder stays unallocated (consistent with surplus handling).
 }
 
 std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>& ballots, int seats)

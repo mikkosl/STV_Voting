@@ -890,6 +890,58 @@ void displayCandidateList(const std::vector<std::string>& candidates)
     }
 }
 
+// Validating parser: collects errors so the caller can re-prompt
+struct ParseBallotResult {
+    std::vector<std::string> ballot;
+    bool hadOutOfRange = false;
+    bool hadDuplicate = false;
+    bool hadInvalid = false;
+    bool hasError() const { return hadOutOfRange || hadDuplicate || hadInvalid; }
+};
+
+static ParseBallotResult parseBallotFromRowNumbersWithValidation(
+    const std::vector<std::string>& candidates,
+    const std::string& line)
+{
+    ParseBallotResult res;
+    if (candidates.empty()) return res;
+
+    std::set<size_t> used;
+    std::stringstream ss(line);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        const std::string t = trim(token);
+        if (t.empty()) continue;
+
+        try {
+            size_t idxPos = 0;
+            long long val = std::stoll(t, &idxPos, 10);
+            if (idxPos != t.size() || val <= 0) {
+                std::cout << "Invalid token: " << t << "\n";
+                res.hadInvalid = true;
+                continue;
+            }
+            size_t oneBased = static_cast<size_t>(val);
+            if (oneBased == 0 || oneBased > candidates.size()) {
+                std::cout << "Out-of-range index: " << t << "\n";
+                res.hadOutOfRange = true;
+                continue;
+            }
+            size_t zeroBased = oneBased - 1;
+            if (used.insert(zeroBased).second) {
+                res.ballot.push_back(candidates[zeroBased]);
+            } else {
+                std::cout << "Duplicate index: " << t << "\n";
+                res.hadDuplicate = true;
+            }
+        } catch (const std::exception&) {
+            std::cout << "Invalid token: " << t << "\n";
+            res.hadInvalid = true;
+        }
+    }
+    return res;
+}
+
 // Parse a single ranked ballot from a comma-separated string of row numbers.
 std::vector<std::string> parseBallotFromRowNumbers(const std::vector<std::string>& candidates,
                                                    const std::string& line)
@@ -944,13 +996,25 @@ std::vector<std::vector<std::string>> inputBallotsByRowNumbers(const std::vector
         const std::string s = trim(line);
         if (s.empty()) break;
 
-        auto ballot = parseBallotFromRowNumbers(candidates, s);
-        if (ballot.empty()) {
+        ParseBallotResult parsed = parseBallotFromRowNumbersWithValidation(candidates, s);
+
+        if (parsed.hasError()) {
+            std::cout << "(please re-enter ballot " << i << ": ";
+            bool first = true;
+            if (parsed.hadOutOfRange) { std::cout << (first ? "" : ", ") << "out-of-range index"; first = false; }
+            if (parsed.hadDuplicate)  { std::cout << (first ? "" : ", ") << "duplicate index";   first = false; }
+            if (parsed.hadInvalid)    { std::cout << (first ? "" : ", ") << "invalid token";     first = false; }
+            std::cout << " detected)\n";
+            continue; // re-prompt same ballot number
+        }
+
+        if (parsed.ballot.empty()) {
             std::cout << "(no valid selections, ballot ignored)\n";
             ++i;
             continue;
         }
-        ballots.push_back(std::move(ballot));
+
+        ballots.push_back(std::move(parsed.ballot));
         ++i;
     }
 

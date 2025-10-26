@@ -654,6 +654,8 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
 
     // Main loop
     while (static_cast<int>(elected.size()) < seats) {
+        // Snapshot who was elected at the start of this round (display-only)
+        const std::set<std::string> electedAtStart = elected;
 
         // 0) Transfer any pending surpluses from winners elected in a prior elimination round
         if (!pendingSurplus.empty()) {
@@ -688,8 +690,27 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
                     transferSurplus(cand, surplus, quota, ballots, voteCounts, elected);
                 }
 
-                // Print a round for these surplus transfers
-                printCsvRound(round++, voteCounts, elected, allCandidates, transferredAmounts, sourceBreakdown);
+                // Print a round for these surplus transfers (display-only elected snapshot)
+                {
+                    // Mark anyone who now reached quota as Elected (display-only)
+                    std::set<std::string> electedForDisplay = elected;
+                    for (const auto& kv : voteCounts) {
+                        if (!elected.count(kv.first) && (kv.second + kEps) >= quota) {
+                            electedForDisplay.insert(kv.first);
+                        }
+                    }
+
+                    // Show real counts for newly reaching-quota candidates.
+                    // Clamp only candidates who were already elected at the start of the round.
+                    std::map<std::string, double> displayCounts = voteCounts;
+                    for (const auto& c : electedAtStart) {
+                        auto it = displayCounts.find(c);
+                        if (it != displayCounts.end() && it->second > quota) it->second = quota;
+                    }
+
+                    printCsvRound(round++, displayCounts, electedForDisplay, allCandidates,
+                                  transferredAmounts, sourceBreakdown);
+                }
 
                 // Record state for §11D history
                 history.push_back(voteCounts);
@@ -844,6 +865,7 @@ for (const auto& cand : newly) {
                 double amt = kv.second;
                 sources[rcpt].push_back(std::make_pair(toEliminate, amt));
             }
+            // Prepare and print CSV round for elimination transfers
             printCsvRound(round++, voteCounts, elected, allCandidates, elimDist, sources);
         }
 

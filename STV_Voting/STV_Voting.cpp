@@ -65,6 +65,71 @@ static std::string resolveTieSTVWithHistoryForElimination(
 // Add this helper function near the top of the file, before its first use:
 static double floor2(double x) { return std::floor(x * 100.0) / 100.0; }
 
+// Print CSV header for election rounds
+void printCsvHeader()
+{
+    std::cout << "Round";
+    std::cout << ",Candidate";
+    std::cout << ",Votes";
+    std::cout << ",Status";
+    std::cout << ",Transferred";
+    std::cout << ",Sources";
+    std::cout << "\n";
+}
+
+// Print a CSV row for each candidate in the round, including transfers and source breakdowns.
+void printCsvRound(
+    int round,
+    const std::map<std::string, double>& voteCounts,
+    const std::set<std::string>& elected,
+    const std::set<std::string>& allCandidates,
+    const std::map<std::string, double>& transferredAmounts,
+    const std::map<std::string, std::vector<std::pair<std::string, double>>>& transferSources)
+{
+    for (const auto& cand : allCandidates) {
+        std::cout << round;
+        std::cout << "," << cand;
+
+        auto it = voteCounts.find(cand);
+        double votes = (it != voteCounts.end()) ? it->second : 0.0;
+        std::cout << "," << std::fixed << std::setprecision(2) << votes;
+
+        const bool isElected = elected.count(cand) != 0;
+        std::string status;
+        if (isElected) {
+            status = "Elected";
+        }
+        else if (voteCounts.find(cand) == voteCounts.end()) {
+            status = "Eliminated";
+        }
+        else {
+            status = "Continuing";
+        }
+        std::cout << "," << status;
+
+        // Transferred amount (total received this round)
+        std::cout << ",";
+        auto tIt = transferredAmounts.find(cand);
+        if (tIt != transferredAmounts.end()) {
+            std::cout << std::fixed << std::setprecision(2) << tIt->second;
+        }
+
+        // All sources with per-source amounts: e.g., Alice(1.20); Bob(0.80)
+        std::cout << ",";
+        auto sIt = transferSources.find(cand);
+        if (sIt != transferSources.end()) {
+            const auto& items = sIt->second;
+            for (size_t i = 0; i < items.size(); ++i) {
+                const auto& src = items[i];
+                std::cout << src.first << "(" << std::fixed << std::setprecision(2) << src.second << ")";
+                if (i + 1 < items.size()) std::cout << "; ";
+            }
+        }
+        std::cout << "\n";
+    }
+    std::cout << "\n";
+}
+
 // Add these implementations above main() (e.g., after transferEliminatedVotes and before runMultiSeatElection)
 
 // Recompute per-round totals for single-seat election.
@@ -104,6 +169,54 @@ static std::map<std::string, double> computeSingleSeatRoundTotals(
     return totals;
 }
 
+// Compute display-only transfers for single-seat elimination.
+// Ballots whose current top is the eliminated candidate:
+//  - if they have a next continuing preference, transfer 1.00 to that candidate
+//  - else split 1.00 equally across all remaining continuing candidates (floored per share)
+static std::map<std::string, double> computeSingleSeatEliminationDistributionForLog(
+    const std::string& eliminated,
+    const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& continuingBefore,
+    const std::set<std::string>& continuingAfter)
+{
+    std::map<std::string, double> result;
+    if (continuingAfter.empty()) return result;
+
+    for (const auto& ballot : ballots) {
+        // Find top continuing BEFORE elimination
+        size_t elimIndex = std::numeric_limits<size_t>::max();
+        std::string topBefore;
+        for (size_t i = 0; i < ballot.size(); ++i) {
+            if (continuingBefore.count(ballot[i])) {
+                topBefore = ballot[i];
+                elimIndex = i;
+                break;
+            }
+        }
+        if (topBefore != eliminated) continue;
+
+        // Find next continuing AFTER elimination
+        bool transferred = false;
+        for (size_t j = elimIndex + 1; j < ballot.size(); ++j) {
+            const auto& c = ballot[j];
+            if (continuingAfter.count(c)) {
+                result[c] += 1.0;
+                transferred = true;
+                break;
+            }
+        }
+        if (!transferred) {
+            // No next preference => split equally across all continuingAfter (2-decimal floor per share)
+            const double share = floor2(1.0 / static_cast<double>(continuingAfter.size()));
+            if (share > 0.0) {
+                for (const auto& c : continuingAfter) result[c] += share;
+            }
+        }
+    }
+
+    return result;
+}
+
 // Single-seat election per rules B(1..8)
 std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& ballots)
 {
@@ -112,11 +225,51 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
     for (const auto& b : ballots) for (const auto& c : b) if (!c.empty()) continuing.insert(c);
     if (continuing.empty()) return {};
 
+    // Keep all candidates for consistent CSV output
+    const std::set<std::string> allCandidates = continuing;
+
     // History of round totals for §11D tie-breaking
     std::vector<std::map<std::string, double>> history;
 
-    // Print the majority threshold (once, from the first round's totals)
+    // Print the majority threshold and CSV header once
     bool printedMajorityThreshold = false;
+    bool printedHeader = false;
+
+    int round = 0;
+
+    // Round 0: initial snapshot
+    {
+        auto totals0 = computeSingleSeatRoundTotals(ballots, continuing);
+        history.push_back(totals0);
+
+        double sum0 = 0.0;
+        for (const auto& kv : totals0) sum0 += kv.second;
+        const double need0 = std::nextafter(0.5 * sum0, std::numeric_limits<double>::infinity()); // strictly greater than half
+
+        std::string majorityCand0;
+        double best0 = -std::numeric_limits<double>::infinity();
+        for (const auto& [cand, v] : totals0) {
+            if (v > best0) { best0 = v; majorityCand0 = cand; }
+        }
+
+        if (!printedMajorityThreshold) {
+            std::cout << "Quota," << std::fixed << std::setprecision(2) << need0 << "\n";
+            printedMajorityThreshold = true;
+        }
+        if (!printedHeader) {
+            printCsvHeader();
+            printedHeader = true;
+        }
+
+        std::set<std::string> electedForDisplay0;
+        if (best0 > need0) electedForDisplay0.insert(majorityCand0);
+
+        std::map<std::string, double> noneAmt;
+        std::map<std::string, std::vector<std::pair<std::string, double>>> noneSrc;
+        printCsvRound(round++, totals0, electedForDisplay0, allCandidates, noneAmt, noneSrc);
+
+        if (best0 > need0) return majorityCand0;
+    }
 
     while (!continuing.empty()) {
         // 2+5+7: recompute totals each round following the rules
@@ -128,17 +281,24 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         for (const auto& kv : totals) sum += kv.second;
         const double need = std::nextafter(0.5 * sum, std::numeric_limits<double>::infinity()); // strictly greater than half
 
-        if (!printedMajorityThreshold) {
-            std::cout << "Quota," << std::fixed << std::setprecision(2) << need << "\n";
-            printedMajorityThreshold = true;
-        }
-
         // 3/6: check majority
         std::string majorityCand;
         double best = -std::numeric_limits<double>::infinity();
         for (const auto& [cand, v] : totals) {
             if (v > best) { best = v; majorityCand = cand; }
         }
+
+        // Display winners for this round if any (for CSV only)
+        std::set<std::string> electedForDisplay;
+        if (best > need) {
+            electedForDisplay.insert(majorityCand);
+        }
+
+        // No transfers in single-seat recomputation; pass empty maps
+        std::map<std::string, double> noTransferred;
+        std::map<std::string, std::vector<std::pair<std::string, double>>> noSources;
+        printCsvRound(round++, totals, electedForDisplay, allCandidates, noTransferred, noSources);
+
         if (best > need) return majorityCand;
 
         // 4/7: eliminate the lowest-vote candidate (resolve ties per §11D elimination rules)
@@ -151,18 +311,48 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         std::string toEliminate;
         if (tied.size() == 1) {
             toEliminate = *tied.begin();
-        }
-        else {
+        } else {
             // Use §11D elimination tiebreak (lowest earlier total, then least next-continuing preferences, finally draw lots)
             std::set<std::string> electedEmpty;
             toEliminate = resolveTieSTVWithHistoryForElimination(history, ballots, tied, totals, electedEmpty);
         }
 
-        // Remove eliminated and continue
-        continuing.erase(toEliminate);
+        // Prepare transfer log for this elimination (display-only)
+        std::set<std::string> continuingAfter = continuing;
+        continuingAfter.erase(toEliminate);
+
+        auto elimDist = computeSingleSeatEliminationDistributionForLog(
+            toEliminate, ballots, continuing, continuingAfter);
+
+        // Recompute totals AFTER elimination for the next round's state
+        auto totalsAfter = computeSingleSeatRoundTotals(ballots, continuingAfter);
+
+        // Build Sources: each recipient shows eliminated as the source with amount received
+        std::map<std::string, std::vector<std::pair<std::string, double>>> sources;
+        for (const auto& kv : elimDist) {
+            sources[kv.first].push_back(std::make_pair(toEliminate, kv.second));
+        }
+
+        // Optional display-only winner marking if majority achieved after elimination
+        double sumAfter = 0.0;
+        for (const auto& kv : totalsAfter) sumAfter += kv.second;
+        const double needAfter = std::nextafter(0.5 * sumAfter, std::numeric_limits<double>::infinity());
+        std::string majorityAfter;
+        double bestAfter = -std::numeric_limits<double>::infinity();
+        for (const auto& [cand, v] : totalsAfter) if (v > bestAfter) { bestAfter = v; majorityAfter = cand; }
+        if (bestAfter > needAfter) electedForDisplay.insert(majorityAfter);
+
+        // Print a CSV round showing the elimination transfers
+        printCsvRound(round++, totalsAfter, electedForDisplay, allCandidates, elimDist, sources);
+
+        // Advance state to AFTER elimination
+        continuing = std::move(continuingAfter);
+        history.push_back(totalsAfter);
 
         // If exactly one remains, they win
         if (continuing.size() == 1) return *continuing.begin();
+        // If majority reached after elimination, declare winner
+        if (bestAfter > needAfter) return majorityAfter;
     }
 
     return {};
@@ -323,70 +513,6 @@ static std::string resolveTieSTVWithHistoryForElimination(const std::vector<std:
     }
 
     return finalTiebreakPick(tiedCandidates);
-}
-
-
-// Print CSV header for election rounds
-void printCsvHeader()
-{
-    std::cout << "Round";
-    std::cout << ",Candidate";
-    std::cout << ",Votes";
-    std::cout << ",Status";
-    std::cout << ",Transferred";
-    std::cout << ",Sources";
-    std::cout << "\n";
-}
-
-// Print a CSV row for each candidate in the round, including transfers and source breakdowns.
-void printCsvRound(
-    int round,
-    const std::map<std::string, double>& voteCounts,
-    const std::set<std::string>& elected,
-    const std::set<std::string>& allCandidates,
-    const std::map<std::string, double>& transferredAmounts,
-    const std::map<std::string, std::vector<std::pair<std::string, double>>>& transferSources)
-{
-    for (const auto& cand : allCandidates) {
-        std::cout << round;
-        std::cout << "," << cand;
-
-        auto it = voteCounts.find(cand);
-        double votes = (it != voteCounts.end()) ? it->second : 0.0;
-        std::cout << "," << std::fixed << std::setprecision(2) << votes;
-
-        const bool isElected = elected.count(cand) != 0;
-        std::string status;
-        if (isElected) {
-            status = "Elected";
-        } else if (voteCounts.find(cand) == voteCounts.end()) {
-            status = "Eliminated";
-        } else {
-            status = "Continuing";
-        }
-        std::cout << "," << status;
-
-        // Transferred amount (total received this round)
-        std::cout << ",";
-        auto tIt = transferredAmounts.find(cand);
-        if (tIt != transferredAmounts.end()) {
-            std::cout << std::fixed << std::setprecision(2) << tIt->second;
-        }
-
-        // All sources with per-source amounts: e.g., Alice(1.20); Bob(0.80)
-        std::cout << ",";
-        auto sIt = transferSources.find(cand);
-        if (sIt != transferSources.end()) {
-            const auto& items = sIt->second;
-            for (size_t i = 0; i < items.size(); ++i) {
-                const auto& src = items[i];
-                std::cout << src.first << "(" << std::fixed << std::setprecision(2) << src.second << ")";
-                if (i + 1 < items.size()) std::cout << "; ";
-            }
-        }
-        std::cout << "\n";
-    }
-    std::cout << "\n";
 }
 
 // Add this function above its first use (e.g., above runMultiSeatElection)

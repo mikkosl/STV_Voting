@@ -52,10 +52,114 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
                                      const std::map<std::string, double>& voteCounts,
                                      const std::set<std::string>& elected);
 
+// Add this prototype above runSingleSeatElection
+static std::string resolveTieSTVWithHistoryForElimination(
+    const std::vector<std::map<std::string, double>>& history,
+    const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& tiedCandidates,
+    const std::map<std::string, double>& voteCounts,
+    const std::set<std::string>& elected);
+
 // --- Implementations ---
 
 // Add this helper function near the top of the file, before its first use:
 static double floor2(double x) { return std::floor(x * 100.0) / 100.0; }
+
+// Add these implementations above main() (e.g., after transferEliminatedVotes and before runMultiSeatElection)
+
+// Recompute per-round totals for single-seat election.
+// Rule: ballot goes to top continuing preference; if none remains, split 1.00
+// equally among all continuing candidates, floored to 2 decimals per share.
+static std::map<std::string, double> computeSingleSeatRoundTotals(
+    const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& continuing)
+{
+    std::map<std::string, double> totals;
+    for (const auto& c : continuing) totals[c] = 0.0;
+
+    if (continuing.empty()) return totals;
+
+    for (const auto& ballot : ballots) {
+        // Find the highest-ranked continuing candidate on this ballot
+        std::string top;
+        for (const auto& c : ballot) {
+            if (continuing.count(c)) { top = c; break; }
+        }
+
+        if (!top.empty()) {
+            totals[top] += 1.0;
+        }
+        else {
+            // No next preference -> split equally across all continuing candidates
+            const size_t m = continuing.size();
+            if (m == 0) continue;
+            const double share = floor2(1.0 / static_cast<double>(m));
+            if (share <= 0.0) continue; // nothing to add if share floors to 0.00
+            for (const auto& c : continuing) {
+                totals[c] += share;
+            }
+        }
+    }
+
+    return totals;
+}
+
+// Single-seat election per rules B(1..8)
+std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& ballots)
+{
+    // Collect candidates
+    std::set<std::string> continuing;
+    for (const auto& b : ballots) for (const auto& c : b) if (!c.empty()) continuing.insert(c);
+    if (continuing.empty()) return {};
+
+    // History of round totals for §11D tie-breaking
+    std::vector<std::map<std::string, double>> history;
+
+    while (!continuing.empty()) {
+        // 2+5+7: recompute totals each round following the rules
+        auto totals = computeSingleSeatRoundTotals(ballots, continuing);
+        history.push_back(totals);
+
+        // Majority threshold = over half of the votes counted this round
+        double sum = 0.0;
+        for (const auto& kv : totals) sum += kv.second;
+        const double need = std::nextafter(0.5 * sum, std::numeric_limits<double>::infinity()); // strictly greater than half
+
+        // 3/6: check majority
+        std::string majorityCand;
+        double best = -std::numeric_limits<double>::infinity();
+        for (const auto& [cand, v] : totals) {
+            if (v > best) { best = v; majorityCand = cand; }
+        }
+        if (best > need) return majorityCand;
+
+        // 4/7: eliminate the lowest-vote candidate (resolve ties per §11D elimination rules)
+        double minV = std::numeric_limits<double>::infinity();
+        for (const auto& [cand, v] : totals) minV = std::min(minV, v);
+
+        std::set<std::string> tied;
+        for (const auto& [cand, v] : totals) if (std::abs(v - minV) <= kEps) tied.insert(cand);
+
+        std::string toEliminate;
+        if (tied.size() == 1) {
+            toEliminate = *tied.begin();
+        }
+        else {
+            // Use §11D elimination tiebreak (lowest earlier total, then least next-continuing preferences, finally draw lots)
+            // Elected set is empty in single-seat flow; continuing is represented by presence in 'totals'.
+            std::set<std::string> electedEmpty;
+            toEliminate = resolveTieSTVWithHistoryForElimination(history, ballots, tied, totals, electedEmpty);
+        }
+
+        // Remove eliminated and continue
+        continuing.erase(toEliminate);
+
+        // If exactly one remains, they win
+        if (continuing.size() == 1) return *continuing.begin();
+    }
+
+    return {};
+}
 
 // Add this helper function near the other tie-break helpers (above its first use)
 static std::string finalTiebreakPick(const std::set<std::string>& tiedCandidates)
@@ -1044,7 +1148,7 @@ int inputNumberOfSeats()
 {
     for (;;)
     {
-        std::cout << "Enter number of seats (positive integer above 1): ";
+        std::cout << "Enter number of seats (positive integer): ";
         std::string line;
         if (!std::getline(std::cin, line)) {
             std::cout << "Input stream closed.\n";
@@ -1064,8 +1168,8 @@ int inputNumberOfSeats()
                 std::cout << "Invalid characters detected. Try again.\n";
                 continue;
             }
-            if (v <= 1 || v > 1000000) {
-                std::cout << "Seats must be between 2 and 1,000,000. Try again.\n";
+            if (v <= 0 || v > 1000000) {
+                std::cout << "Seats must be between 1 and 1,000,000. Try again.\n";
                 continue;
             }
             return static_cast<int>(v);
@@ -1079,22 +1183,36 @@ int main()
 {
     for (;;)
     {
-        std::vector<std::vector<std::string>> multiSeatBallots; 
+        std::vector<std::vector<std::string>> singleSeatBallots;
+        std::vector<std::vector<std::string>> multiSeatBallots;
         std::vector<std::string> candidates;
         int seats;
 
         candidates = inputCandidateNames();
         seats = inputNumberOfSeats();
-        multiSeatBallots = inputBallotsByRowNumbers(candidates);
+        
+        if (seats == 1) {
+            singleSeatBallots = inputBallotsByRowNumbers(candidates);
 
-        auto winners = runMultiSeatElection(multiSeatBallots, seats);
+            auto winner = runSingleSeatElection(singleSeatBallots);
+            if (!winner.empty()) {
+                std::cout << "\nElected (1): " << winner;
+            } else {
+                std::cout << "\nNo winner could be determined.";
+            }
+        }
+        else {
+            multiSeatBallots = inputBallotsByRowNumbers(candidates);
 
-        std::cout << "\nElected (" << winners.size() << "): ";
-        bool first = true;
-        for (const auto& w : winners) {
-            if (!first) std::cout << ", ";
-            std::cout << w;
-            first = false;
+            auto winners = runMultiSeatElection(multiSeatBallots, seats);
+
+            std::cout << "\nElected (" << winners.size() << "): ";
+            bool first = true;
+            for (const auto& w : winners) {
+                if (!first) std::cout << ", ";
+                std::cout << w;
+                first = false;
+            }
         }
 
         // Prompt until we get a clear Y or N

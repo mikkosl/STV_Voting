@@ -322,10 +322,28 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         // Recompute totals AFTER elimination for the next round's state
         auto totalsAfter = computeSingleSeatRoundTotals(ballots, continuingAfter);
 
-        // Build Sources: each recipient shows eliminated as the source with amount received
+        // Combine elimination transfers with re-split delta so Transferred matches Votes delta
+        std::map<std::string, double> transferredCombined = elimDist;
         std::map<std::string, std::vector<std::pair<std::string, double>>> sources;
+
+        // Seed sources with elimination amounts
         for (const auto& kv : elimDist) {
-            sources[kv.first].push_back(std::make_pair(toEliminate, kv.second));
+            const std::string& rcpt = kv.first;
+            double amt = kv.second;
+            sources[rcpt].push_back(std::make_pair(toEliminate, amt));
+        }
+
+        // Add re-split delta (difference between after and before totals not explained by elimDist)
+        for (const auto& kv : totalsAfter) {
+            const std::string& cand = kv.first;
+            const double afterV = kv.second;
+            const double beforeV = (totals.count(cand) ? totals.at(cand) : 0.0);
+            const double loggedElim = (elimDist.count(cand) ? elimDist.at(cand) : 0.0);
+            const double resplit = afterV - beforeV - loggedElim;
+            if (resplit > 1e-9) {
+                transferredCombined[cand] += resplit;
+                sources[cand].push_back(std::make_pair("Resplit", floor2(resplit)));
+            }
         }
 
         // Optional display-only winner marking if majority achieved after elimination
@@ -337,8 +355,8 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         for (const auto& [cand, v] : totalsAfter) if (v > bestAfter) { bestAfter = v; majorityAfter = cand; }
         if (bestAfter > needAfter) electedForDisplay.insert(majorityAfter);
 
-        // Print a CSV round showing the elimination transfers
-        printCsvRound(round++, totalsAfter, electedForDisplay, allCandidates, elimDist, sources);
+        // Print a CSV round showing the combined transfers (elim + resplit)
+        printCsvRound(round++, totalsAfter, electedForDisplay, allCandidates, transferredCombined, sources);
 
         // Advance state to AFTER elimination
         continuing = std::move(continuingAfter);

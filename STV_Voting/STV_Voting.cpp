@@ -294,11 +294,6 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
             electedForDisplay.insert(majorityCand);
         }
 
-        // No transfers in single-seat recomputation; pass empty maps
-        std::map<std::string, double> noTransferred;
-        std::map<std::string, std::vector<std::pair<std::string, double>>> noSources;
-        printCsvRound(round++, totals, electedForDisplay, allCandidates, noTransferred, noSources);
-
         if (best > need) return majorityCand;
 
         // 4/7: eliminate the lowest-vote candidate (resolve ties per §11D elimination rules)

@@ -115,6 +115,9 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
     // History of round totals for §11D tie-breaking
     std::vector<std::map<std::string, double>> history;
 
+    // Print the majority threshold (once, from the first round's totals)
+    bool printedMajorityThreshold = false;
+
     while (!continuing.empty()) {
         // 2+5+7: recompute totals each round following the rules
         auto totals = computeSingleSeatRoundTotals(ballots, continuing);
@@ -124,6 +127,11 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         double sum = 0.0;
         for (const auto& kv : totals) sum += kv.second;
         const double need = std::nextafter(0.5 * sum, std::numeric_limits<double>::infinity()); // strictly greater than half
+
+        if (!printedMajorityThreshold) {
+            std::cout << "Quota," << std::fixed << std::setprecision(2) << need << "\n";
+            printedMajorityThreshold = true;
+        }
 
         // 3/6: check majority
         std::string majorityCand;
@@ -146,7 +154,6 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         }
         else {
             // Use §11D elimination tiebreak (lowest earlier total, then least next-continuing preferences, finally draw lots)
-            // Elected set is empty in single-seat flow; continuing is represented by presence in 'totals'.
             std::set<std::string> electedEmpty;
             toEliminate = resolveTieSTVWithHistoryForElimination(history, ballots, tied, totals, electedEmpty);
         }

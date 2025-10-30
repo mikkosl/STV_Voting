@@ -14,6 +14,7 @@
 #include <sstream>
 #include <limits> // <-- add this
 #include <random> // add this for drawing lots
+#include <cctype> // for std::toupper, std::isspace
 #ifdef _WIN32
 #include <conio.h>
 #endif
@@ -221,7 +222,7 @@ static std::map<std::string, double> computeSingleSeatEliminationDistributionFor
     return result;
 }
 
-// Single-seat election per rules 11B(1..8)
+// Single-seat election per rules §11B(1..8)
 std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& ballots)
 {
     // Collect candidates
@@ -584,40 +585,63 @@ std::map<std::string, double> computeSurplusDistributionForLog(
     };
 
     int transferable = 0;
+    int noNextCount = 0;
     std::map<std::string, int> nextCounts;
 
-    // Count next continuing preferences for ballots currently assigned to 'candidate'
+    // Count next continuing preferences and "no next" for ballots currently on 'candidate'
     for (const auto& ballot : ballots) {
         std::string current;
         size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
             const auto& c = ballot[curIndex];
-            if (voteCounts.find(c) != voteCounts.end()) { // mirrors transferSurplus
+            if (voteCounts.find(c) != voteCounts.end()) {
                 current = c;
                 break;
             }
         }
         if (current != candidate) continue;
 
+        bool foundNext = false;
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& nxt = ballot[j];
             if (isContinuing(nxt)) {
                 ++transferable;
                 nextCounts[nxt] += 1;
+                foundNext = true;
                 break;
             }
         }
+        if (!foundNext) ++noNextCount;
     }
 
-    if (transferable == 0) return result;
+    const int denom = transferable + noNextCount;
+    if (denom == 0) return result;
 
-    // Match transferSurplus: per-ballot value is floored to 2 decimals
-    const double perBallot = floor2(surplus / static_cast<double>(transferable));
+    // Match transferSurplus: per-ballot value uses (transferable + noNextCount)
+    const double perBallot = floor2(surplus / static_cast<double>(denom));
 
-    // Aggregate by recipient using the same per-ballot value
+    // 1) Next recipients get full perBallot times their count
     for (const auto& [rcpt, cnt] : nextCounts) {
-        // Using operator<< later with fixed precision ensures clean 2-decimal output
-        result[rcpt] = perBallot * static_cast<double>(cnt);
+        result[rcpt] += perBallot * static_cast<double>(cnt);
+    }
+
+    // 2) Each “no next” ballot splits perBallot equally over all continuing candidates
+    if (noNextCount > 0) {
+        std::vector<std::string> cont;
+        for (const auto& kv : voteCounts) {
+            const auto& c = kv.first;
+            if (elected.count(c) == 0 && voteCounts.find(c) != voteCounts.end()) {
+                cont.push_back(c);
+            }
+        }
+        if (!cont.empty()) {
+            const double split = floor2(perBallot / static_cast<double>(cont.size()));
+            if (split > 0.0) {
+                for (const auto& c : cont) {
+                    result[c] += split * static_cast<double>(noNextCount);
+                }
+            }
+        }
     }
 
     return result;

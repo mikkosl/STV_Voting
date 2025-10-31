@@ -272,7 +272,7 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         }
 
         if (!printedMajorityThreshold) {
-            std::cout << "Quota," << std::fixed << std::setprecision(2) << need0 << "\n";
+            std::cout << "MajorityThreshold," << std::fixed << std::setprecision(2) << need0 << "\n";
             printedMajorityThreshold = true;
         }
         if (!printedHeader) {

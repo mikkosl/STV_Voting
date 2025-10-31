@@ -792,6 +792,7 @@ std::map<std::string, double> countFirstChoices(const std::vector<std::vector<st
     return counts;
 }
 
+// Replace transferSurplus with this version
 void transferSurplus(std::string candidate,
                      double surplus,
                      double quota,
@@ -825,11 +826,9 @@ void transferSurplus(std::string candidate,
         }
     }
 
-    // Transfer to next recipients only if available, otherwise split among all continuing candidates
     const int transferable = static_cast<int>(nextRecipients.size());
-    // Count ballots that had no next continuing candidate
+
     int noNextCount = 0;
-    // recount "no next"
     for (const auto& ballot : ballots) {
         std::string current; size_t curIndex = 0;
         for (; curIndex < ballot.size(); ++curIndex) {
@@ -850,23 +849,31 @@ void transferSurplus(std::string candidate,
     if (denom == 0) return;
 
     const double perBallot = floor2(surplus / static_cast<double>(denom));
+    if (perBallot <= 0.0) return;
 
     // 1) next recipients get full perBallot times their count
-    // Add this before the loop to declare and populate nextCounts
     std::map<std::string, int> nextCounts;
     for (const auto& nxt : nextRecipients) {
         nextCounts[nxt]++;
     }
+
+    double movedTotal = 0.0;
     for (const auto& [rcpt, cnt] : nextCounts) {
-        voteCounts[rcpt] += perBallot * static_cast<double>(cnt);
+        const double add = perBallot * static_cast<double>(cnt);
+        voteCounts[rcpt] += add;
+        movedTotal += add;
     }
 
     // 2) each “no next” ballot splits perBallot equally over all continuing
     if (noNextCount > 0) {
         std::vector<std::string> cont;
-        for (const auto& kv : voteCounts)
+        cont.reserve(voteCounts.size());
+        for (const auto& kv : voteCounts) {
             if (elected.count(kv.first) == 0 && voteCounts.find(kv.first) != voteCounts.end())
                 cont.push_back(kv.first);
+        }
+        // Remove the source candidate from cont if present
+        cont.erase(std::remove(cont.begin(), cont.end(), candidate), cont.end());
 
         if (!cont.empty()) {
             const double split = floor2(perBallot / static_cast<double>(cont.size()));
@@ -876,9 +883,14 @@ void transferSurplus(std::string candidate,
                         voteCounts[c] += split;
                     }
                 }
+                movedTotal += split * static_cast<double>(cont.size()) * static_cast<double>(noNextCount);
             }
         }
+        // If cont is empty, these ballots’ perBallot exhausts (no addition, no movedTotal increase)
     }
+
+    // Deduct exactly what was moved (post-flooring) from the winner to conserve totals.
+    candIt->second = std::max(0.0, floor2(candIt->second - movedTotal));
 }
 
 void transferEliminatedVotes(std::string eliminated,

@@ -380,9 +380,8 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         for (const auto& [cand, v] : totalsAfter) if (v > bestAfter) { bestAfter = v; majorityAfter = cand; }
         if (bestAfter > needAfter) electedForDisplay.insert(majorityAfter);
 
-        // Print a CSV round showing the combined transfers (elim + resplit)
-        auto displayAfter = makeDisplayCountsClampedToQuota(totalsAfter, electedForDisplay, needAfter);
-        printCsvRound(round++, displayAfter, electedForDisplay, allCandidates, transferredCombined, sources);
+        // Show real totals this round (clamp starts next round)
+        printCsvRound(round++, totalsAfter, electedForDisplay, allCandidates, transferredCombined, sources);
 
         // Advance state to AFTER elimination
         continuing = std::move(continuingAfter);
@@ -1075,8 +1074,11 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
                         }
                     }
 
+                    // Clamp only those already elected at the start of the round
                     // Clamp all elected to the quota for display
-                    auto displayCounts = makeDisplayCountsClampedToQuota(voteCounts, electedForDisplay, quota);
+                    // auto displayCounts = makeDisplayCountsClampedToQuota(voteCounts, electedForDisplay, quota);
+                    // Clamp only candidates elected at the start of the round; show real totals for newly crossing
+                    auto displayCounts = makeDisplayCountsClampedToQuota(voteCounts, electedAtStart, quota);
 
                     printCsvRound(round++, displayCounts, electedForDisplay, allCandidates,
                                   transferredAmounts, sourceBreakdown);
@@ -1113,23 +1115,24 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
             std::map<std::string, std::vector<std::pair<std::string, double>>> sourceBreakdown;
 
             // in runMultiSeatElection, where surplus is processed
-for (const auto& cand : newly) {
- const double surplus = voteCounts[cand] - quota;
- if (surplus > 0.0) {
- auto dist = computeSurplusDistributionForLog(cand, surplus, ballots, elected, voteCounts);
- for (std::map<std::string, double>::const_iterator it = dist.begin(); it != dist.end(); ++it) {
- const std::string& rcpt = it->first;
- double amt = it->second;
- transferredAmounts[rcpt] += amt;
- sourceBreakdown[rcpt].push_back(std::make_pair(cand, amt));
- }
- transferSurplus(cand, surplus, quota, ballots, voteCounts, elected);
- }
-}
+            for (const auto& cand : newly) {
+                const double surplus = voteCounts[cand] - quota;
+                if (surplus > 0.0) {
+                    auto dist = computeSurplusDistributionForLog(cand, surplus, ballots, elected, voteCounts);
+                    for (std::map<std::string, double>::const_iterator it = dist.begin(); it != dist.end(); ++it) {
+                        const std::string& rcpt = it->first;
+                        double amt = it->second;
+                        transferredAmounts[rcpt] += amt;
+                        sourceBreakdown[rcpt].push_back(std::make_pair(cand, amt));
+                    }
+                }
+                transferSurplus(cand, surplus, quota, ballots, voteCounts, elected);
+            }
 
             // Print a CSV round showing the transfers (if any)
- auto displayAfterElections = makeDisplayCountsClampedToQuota(voteCounts, elected, quota);
- printCsvRound(round++, displayAfterElections, elected, allCandidates, transferredAmounts, sourceBreakdown);
+            // Clamp only those already elected at the start of the round; show real totals for newly crossing
+            auto displayAfterElections = makeDisplayCountsClampedToQuota(voteCounts, electedAtStart, quota);
+            printCsvRound(round++, displayAfterElections, elected, allCandidates, transferredAmounts, sourceBreakdown);
 
             // Record post-surplus state for §11D history-based tie-breaks
             history.push_back(voteCounts);
@@ -1231,7 +1234,8 @@ for (const auto& cand : newly) {
                 sources[rcpt].push_back(std::make_pair(toEliminate, amt));
             }
             // Prepare and print CSV round for elimination transfers
-            auto displayCounts = makeDisplayCountsClampedToQuota(voteCounts, elected, quota);
+            // Clamp only those already elected at the start of the round; show real totals for newly crossing
+            auto displayCounts = makeDisplayCountsClampedToQuota(voteCounts, electedAtStart, quota);
             printCsvRound(round++, displayCounts, elected, allCandidates, elimDist, sources);
         }
 

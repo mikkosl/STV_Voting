@@ -5,6 +5,9 @@ project(STV_Voting LANGUAGES CXX)
 # project specific logic here.
 #
 
+# Enable the experimental ticket engine for this build
+add_compile_definitions(STV_EXPERIMENTAL_TICKETS=1)
+
 # Add source to this project's executable.
 add_executable (STV_Voting "STV_Voting.cpp" "STV_Voting.h")
 

@@ -912,14 +912,11 @@ void transferEliminatedVotes(std::string eliminated,
     const double eliminatedTotal = voteCounts[eliminated];
     const double perBallot = floor2(eliminatedTotal / static_cast<double>(transferable));
 
-    double totalTransferred = 0.0;
     for (const auto& rcpt : nextRecipients) {
         voteCounts[rcpt] += perBallot;
-        totalTransferred += perBallot;
     }
 
-    // Note: caller erases the eliminated candidate from voteCounts.
-    // Any tiny rounding remainder stays unallocated (consistent with surplus handling).
+    return;
 }
 
 std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>& ballots, int seats)
@@ -1529,4 +1526,246 @@ int main()
         if (!runAgain) break; // safety
     }
 }
+
+#if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
+
+// Experimental ticket-based batch processing
+struct Ticket {
+    std::vector<std::string> prefs;
+    size_t pos = 0;          // index of current continuing choice
+    double weight = 1.0;     // rounded at each transfer with floor2
+    int batchId = 0;         // incremented when rerouted; used for "last batch" logic
+};
+
+// Batch id source for moves/transfers
+static int gBatchId = 1;
+
+static bool isContinuingCandidate(const std::string& c,
+                                  const std::set<std::string>& elected,
+                                  const std::set<std::string>& eliminated)
+{
+    return elected.count(c) == 0 && eliminated.count(c) == 0;
+}
+
+static void advanceToNextContinuing(Ticket& t,
+                                    const std::set<std::string>& elected,
+                                    const std::set<std::string>& eliminated)
+{
+    while (t.pos < t.prefs.size()) {
+        const std::string& c = t.prefs[t.pos];
+        if (isContinuingCandidate(c, elected, eliminated)) return;
+        ++t.pos;
+    }
+}
+
+static std::map<std::string, double> recomputeCountsFromTickets(
+    const std::vector<Ticket>& tickets,
+    const std::set<std::string>& allCandidates,
+    const std::set<std::string>& elected,
+    const std::set<std::string>& eliminated)
+{
+    std::map<std::string, double> counts;
+    for (const auto& c : allCandidates) {
+        if (eliminated.count(c) == 0) counts[c] = 0.0;
+    }
+    for (const auto& t : tickets) {
+        if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
+        const std::string& c = t.prefs[t.pos];
+        if (isContinuingCandidate(c, elected, eliminated)) {
+            counts[c] += t.weight;
+        }
+    }
+    return counts;
+}
+
+static std::map<std::string, std::vector<int>> buildAssignedMap(
+    const std::vector<Ticket>& tickets,
+    const std::set<std::string>& elected,
+    const std::set<std::string>& eliminated)
+{
+    std::map<std::string, std::vector<int>> assigned;
+    for (int i = 0; i < static_cast<int>(tickets.size()); ++i) {
+        const auto& t = tickets[i];
+        if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
+        const std::string& c = t.prefs[t.pos];
+        if (isContinuingCandidate(c, elected, eliminated)) {
+            assigned[c].push_back(i);
+        }
+    }
+    return assigned;
+}
+
+// Transfer elected candidate's surplus using only the "last equal-valued batch" that caused the surplus.
+// Returns per-recipient amounts and source breakdown for CSV.
+static std::pair<std::map<std::string, double>,
+                 std::map<std::string, std::vector<std::pair<std::string, double>>>>
+transferSurplusLastBatch(const std::string& cand,
+                         double quota,
+                         std::vector<Ticket>& tickets,
+                         const std::set<std::string>& allCandidates,
+                         const std::set<std::string>& elected,
+                         const std::set<std::string>& eliminated)
+{
+    std::map<std::string, double> transferred;
+    std::map<std::string, std::vector<std::pair<std::string, double>>> sources;
+
+    // Compute current total for cand
+    double total = 0.0;
+    for (const auto& t : tickets) {
+        if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
+        if (t.prefs[t.pos] == cand) total += t.weight;
+    }
+    double surplus = total - quota;
+    if (surplus <= kEps) return {transferred, sources};
+
+    // Identify last equal-valued batch among tickets currently at cand
+    int maxBatch = std::numeric_limits<int>::min();
+    for (const auto& t : tickets) {
+        if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
+        if (t.prefs[t.pos] == cand) maxBatch = std::max(maxBatch, t.batchId);
+    }
+    if (maxBatch == std::numeric_limits<int>::min()) return {transferred, sources};
+
+    std::vector<int> lastBatchIdx;
+    lastBatchIdx.reserve(tickets.size());
+    for (int i = 0; i < static_cast<int>(tickets.size()); ++i) {
+        const auto& t = tickets[i];
+        if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
+        if (t.prefs[t.pos] == cand && t.batchId == maxBatch) {
+            lastBatchIdx.push_back(i);
+        }
+    }
+    if (lastBatchIdx.empty()) return {transferred, sources};
+
+    // Determine next recipients (or no-next) for last batch
+    int transferable = 0;
+    int noNextCount = 0;
+    std::vector<int> nextPos(lastBatchIdx.size(), -1); // next continuing position index in prefs
+    for (size_t k = 0; k < lastBatchIdx.size(); ++k) {
+        const int idx = lastBatchIdx[k];
+        const auto& t = tickets[idx];
+        size_t p = t.pos + 1;
+        int foundPos = -1;
+        for (; p < t.prefs.size(); ++p) {
+            const std::string& nxt = t.prefs[p];
+            if (isContinuingCandidate(nxt, elected, eliminated)) {
+                foundPos = static_cast<int>(p);
+                break;
+            }
+        }
+        if (foundPos >= 0) { transferable++; nextPos[k] = foundPos; }
+        else { noNextCount++; }
+    }
+
+    int denom = transferable + noNextCount;
+    if (denom == 0) return {transferred, sources};
+
+    const double perBallot = floor2(surplus / static_cast<double>(denom));
+    if (perBallot <= 0.0) return {transferred, sources};
+
+    const int thisBatchId = gBatchId++;
+    // For "no next" case, precompute continuing recipients (exclude elected/eliminated and also exclude cand)
+    std::vector<std::string> cont;
+    cont.reserve(allCandidates.size());
+    for (const auto& c : allCandidates) {
+        if (isContinuingCandidate(c, elected, eliminated) && c != cand) cont.push_back(c);
+    }
+
+    // Apply transfers: split each ticket's perBallot out of the candidate's ticket into new ticket(s).
+    for (size_t k = 0; k < lastBatchIdx.size(); ++k) {
+        const int idx = lastBatchIdx[k];
+        Ticket& t = tickets[idx];
+
+        // Reduce original ticket by perBallot (floor to 2 decimals for the ticket weight)
+        t.weight = floor2(t.weight - perBallot);
+        if (t.weight < 0.0) t.weight = 0.0; // safety clamp
+
+        if (nextPos[k] >= 0) {
+            // Create a new ticket fragment for the recipient
+            Ticket fragment = t;
+            fragment.pos = static_cast<size_t>(nextPos[k]);
+            fragment.weight = perBallot;
+            fragment.batchId = thisBatchId;
+            tickets.push_back(fragment);
+
+            const std::string& rcpt = fragment.prefs[fragment.pos];
+            transferred[rcpt] += perBallot;
+            sources[rcpt].push_back(std::make_pair(cand, perBallot));
+        } else {
+            // No next -> split equally across all continuing candidates
+            if (!cont.empty()) {
+                const double split = floor2(perBallot / static_cast<double>(cont.size()));
+                if (split > 0.0) {
+                    for (const auto& rcpt : cont) {
+                        Ticket fragment = t;
+                        // Move fragment to rcpt (find its position in prefs or synthesize)
+                        size_t p = 0;
+                        bool found = false;
+                        for (; p < fragment.prefs.size(); ++p) {
+                            if (fragment.prefs[p] == rcpt) { found = true; break; }
+                        }
+                        if (!found) {
+                            fragment.prefs.push_back(rcpt);
+                            p = fragment.prefs.size() - 1;
+                        }
+                        fragment.pos = p;
+                        fragment.weight = split;
+                        fragment.batchId = thisBatchId;
+                        tickets.push_back(fragment);
+
+                        transferred[rcpt] += split;
+                        sources[rcpt].push_back(std::make_pair(cand, split));
+                    }
+                }
+            }
+            // If cont is empty, perBallot just leaves the system (exhausted surplus)
+        }
+    }
+
+    return {transferred, sources};
+}
+
+// Eliminate candidate and transfer each ticket at full current weight to the next continuing preference.
+// Returns per-recipient amounts and source breakdown for CSV.
+static std::pair<std::map<std::string, double>,
+                 std::map<std::string, std::vector<std::pair<std::string, double>>>>
+eliminateAndTransferFull(const std::string& eliminatedCand,
+                         std::vector<Ticket>& tickets,
+                         const std::set<std::string>& elected,
+                         const std::set<std::string>& eliminated)
+{
+    std::map<std::string, double> transferred;
+    std::map<std::string, std::vector<std::pair<std::string, double>>> sources;
+
+    const int thisBatchId = gBatchId++;
+
+    for (auto& t : tickets) {
+        if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
+        if (t.prefs[t.pos] != eliminatedCand) continue;
+
+        // Find next continuing recipient
+        size_t p = t.pos + 1;
+        int nextFoundPos = -1;
+        for (; p < t.prefs.size(); ++p) {
+            const std::string& nxt = t.prefs[p];
+            if (isContinuingCandidate(nxt, elected, eliminated)) { nextFoundPos = static_cast<int>(p); break; }
+        }
+        if (nextFoundPos >= 0) {
+            const std::string& rcpt = t.prefs[static_cast<size_t>(nextFoundPos)];
+            transferred[rcpt] += t.weight;
+            sources[rcpt].push_back(std::make_pair(eliminatedCand, t.weight));
+
+            // Move ticket in place to recipient with full weight
+            t.pos = static_cast<size_t>(nextFoundPos);
+            t.batchId = thisBatchId;
+        } else {
+            // Exhausted
+            t.weight = 0.0;
+        }
+    }
+
+    return {transferred, sources};
+}
+
+#endif // STV_EXPERIMENTAL_TICKETS
 

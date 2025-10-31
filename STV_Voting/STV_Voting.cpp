@@ -97,6 +97,20 @@ static std::map<std::string, double> makeDisplayCountsClampedToQuota(
     return display;
 }
 
+// Add above printCsvRound
+static std::string csvQuote(const std::string& s)
+{
+    std::string out;
+    out.reserve(s.size() + 2);
+    out.push_back('"');
+    for (char ch : s) {
+        if (ch == '"') out.push_back('"'); // escape double-quote by doubling
+        out.push_back(ch);
+    }
+    out.push_back('"');
+    return out;
+}
+
 // Print a CSV row for each candidate in the round, including transfers and source breakdowns.
 void printCsvRound(
     int round,
@@ -108,7 +122,7 @@ void printCsvRound(
 {
     for (const auto& cand : allCandidates) {
         std::cout << round;
-        std::cout << "," << cand;
+        std::cout << "," << csvQuote(cand);
 
         auto it = voteCounts.find(cand);
         double votes = (it != voteCounts.end()) ? it->second : 0.0;
@@ -118,23 +132,19 @@ void printCsvRound(
         std::string status;
         if (isElected) {
             status = "Elected";
-        }
-        else if (voteCounts.find(cand) == voteCounts.end()) {
+        } else if (voteCounts.find(cand) == voteCounts.end()) {
             status = "Eliminated";
-        }
-        else {
+        } else {
             status = "Continuing";
         }
         std::cout << "," << status;
 
-        // Transferred amount (total received this round)
         std::cout << ",";
         auto tIt = transferredAmounts.find(cand);
         if (tIt != transferredAmounts.end()) {
             std::cout << std::fixed << std::setprecision(2) << tIt->second;
         }
 
-        // All sources with per-source amounts: e.g., Alice(1.20); Bob(0.80)
         std::cout << ",";
         auto sIt = transferSources.find(cand);
         if (sIt != transferSources.end()) {
@@ -173,8 +183,7 @@ static std::map<std::string, double> computeSingleSeatRoundTotals(
 
         if (!top.empty()) {
             totals[top] += 1.0;
-        }
-        else {
+        } else {
             // No next preference -> split equally across all continuing candidates
             const size_t m = continuing.size();
             if (m == 0) continue;
@@ -328,8 +337,7 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
         std::string toEliminate;
         if (tied.size() == 1) {
             toEliminate = *tied.begin();
-        }
-        else {
+        } else {
             // §11D: if no surplus transfers this phase, use raw 2nd/3rd/...
             toEliminate = resolveTieByRawRanks(ballots, tied);
             if (toEliminate.empty()) {

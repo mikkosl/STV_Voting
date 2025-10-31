@@ -3,6 +3,7 @@
 
 #include "STV_Voting.h"
 
+#include <cstdlib> // add near other includes
 #include <map>
 #include <set>
 #include <string>
@@ -426,7 +427,7 @@ static std::string resolveTieByRawRanks(
     return {};
 }
 
-// Add this helper function near the other tie-break helpers (above its first use)
+// Replace existing finalTiebreakPick with this version
 static std::string finalTiebreakPick(const std::set<std::string>& tiedCandidates)
 {
     if (tiedCandidates.empty()) return {};

@@ -29,6 +29,21 @@ using namespace std;
 // Numeric epsilon for FP comparisons in tie logic
 constexpr double kEps = 1e-9;
 
+#if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
+
+// Move this struct definition to the top of the #if block, before any use of Ticket
+struct Ticket {
+    std::vector<std::string> prefs;
+    size_t pos = 0;          // index of current continuing choice
+    double weight = 1.0;     // rounded at each transfer with floor2
+    int batchId = 0;         // incremented when rerouted; used for "last batch" logic
+};
+
+// Add a single file-scope batch id shared by helper functions and election routine
+static int gBatchId = 1;
+
+#endif // STV_EXPERIMENTAL_TICKETS
+
 // Multi-seat Single Transferable Vote
 
 // Step 1: Calculate the election quota
@@ -72,6 +87,14 @@ static std::string resolveTieSTVWithHistoryForElimination(
 
 #if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
 std::set<std::string> runMultiSeatElection_Tickets(const std::vector<std::vector<std::string>>&, int);
+
+// Place this prototype near the other prototypes inside the STV_EXPERIMENTAL_TICKETS block
+static std::map<std::string, double> recomputeCountsFromTickets(
+    const std::vector<Ticket>&,
+    const std::set<std::string>&,
+    const std::set<std::string>&,
+    const std::set<std::string>&);
+
 #endif
 
 // --- Implementations ---
@@ -1314,18 +1337,6 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
 #endif
 }
 
-#if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
-
-// Move this struct definition to the top of the #if block, before any use of Ticket
-struct Ticket {
-    std::vector<std::string> prefs;
-    size_t pos = 0;          // index of current continuing choice
-    double weight = 1.0;     // rounded at each transfer with floor2
-    int batchId = 0;         // incremented when rerouted; used for "last batch" logic
-};
-
-#endif // STV_EXPERIMENTAL_TICKETS
-
 // Add this implementation near the end of the file, after the #endif for STV_EXPERIMENTAL_TICKETS
 
 #if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
@@ -1379,7 +1390,6 @@ std::set<std::string> runMultiSeatElection_Tickets(const std::vector<std::vector
     std::set<std::string> eliminated;
     std::set<std::string> allCandidates;
     std::vector<Ticket> tickets;
-    static int gBatchId = 1;
 
     // Collect all candidates
     for (const auto& b : ballots)
@@ -1675,9 +1685,6 @@ int inputNumberOfSeats()
 
 
 #if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
-
-// Batch id source for moves/transfers
-static int gBatchId = 1;
 
 static bool isContinuingCandidate(const std::string& c,
     const std::set<std::string>& elected,

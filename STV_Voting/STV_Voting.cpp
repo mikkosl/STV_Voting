@@ -326,10 +326,14 @@ std::string runSingleSeatElection(const std::vector<std::vector<std::string>>& b
 
         std::map<std::string, double> noneAmt;
         std::map<std::string, std::vector<std::pair<std::string, double>>> noneSrc;
-        auto display0 = makeDisplayCountsClampedToQuota(totals0, electedForDisplay0, need0);
+        // Remove clamping: show raw totals
+        auto display0 = totals0;
         printCsvRound(round++, display0, electedForDisplay0, allCandidates, noneAmt, noneSrc);
 
-        if (best0 > need0) return majorityCand0;
+        if (true)
+        {
+
+        } if (best0 > need0) return majorityCand0;
     }
 
     while (!continuing.empty()) {
@@ -1004,10 +1008,13 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
     printCsvHeader();
     int round = 0;
     {
+        auto totals0 = voteCounts;
+        std::set<std::string> electedForDisplay0;
         std::map<std::string, double> noneAmt;
         std::map<std::string, std::vector<std::pair<std::string, double>>> noneSrc;
-        auto display0 = makeDisplayCountsClampedToQuota(voteCounts, elected, quota);
-        printCsvRound(round++, display0, elected, allCandidates, noneAmt, noneSrc);
+        // Remove clamping: show raw totals
+        auto display0 = totals0;
+        printCsvRound(round++, display0, electedForDisplay0, allCandidates, noneAmt, noneSrc);
     }
 
     // Helper: elect everyone meeting quota (but never exceed seats)
@@ -1162,7 +1169,6 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
                 return a < b;
             });
 
-            // Accumulate a per-round transfer log (amounts received by recipients, and all sources)
             std::map<std::string, double> transferredAmounts;
             std::map<std::string, std::vector<std::pair<std::string, double>>> sourceBreakdown;
 
@@ -1215,15 +1221,17 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
             if (std::abs(votes - minVotes) <= kEps) tied.insert(cand);
         }
 
-        // when computing toEliminate
         std::string toEliminate;
         if (tied.size() == 1) {
             toEliminate = *tied.begin();
-        }
-        else {
+        } else {
             // §11D: if no surplus transfers this phase, use raw 2nd/3rd/...
             toEliminate = resolveTieByRawRanks(ballots, tied);
             if (toEliminate.empty()) {
+                // Fix: add declaration and initialization for 'history'
+                std::vector<std::map<std::string, double>> history;
+                history.push_back(voteCounts);
+
                 toEliminate = resolveTieSTVWithHistoryForElimination(history, ballots, tied, voteCounts, elected);
             }
         }
@@ -1370,13 +1378,16 @@ static std::map<std::string, double> recomputeCountsFromTickets(
     const std::set<std::string>& eliminated)
 {
     std::map<std::string, double> counts;
+    // Initialize all non-eliminated candidates (including elected) so they appear in display.
     for (const auto& c : allCandidates) {
         if (eliminated.count(c) == 0) counts[c] = 0.0;
     }
+
+    // Sum weights for all non-eliminated candidates (do NOT exclude elected here).
     for (const auto& t : tickets) {
         if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
         const std::string& c = t.prefs[t.pos];
-        if (elected.count(c) == 0 && eliminated.count(c) == 0) {
+        if (eliminated.count(c) == 0) {
             counts[c] += t.weight;
         }
     }
@@ -1419,10 +1430,13 @@ std::set<std::string> runMultiSeatElection_Tickets(const std::vector<std::vector
     // Initial counts
     auto voteCounts = recomputeCountsFromTickets(tickets, allCandidates, elected, eliminated);
     {
+        auto totals0 = voteCounts;
+        std::set<std::string> electedForDisplay0;
         std::map<std::string, double> noneAmt;
         std::map<std::string, std::vector<std::pair<std::string, double>>> noneSrc;
-        auto display0 = makeDisplayCountsClampedToQuota(voteCounts, elected, quota);
-        printCsvRound(round++, display0, elected, allCandidates, noneAmt, noneSrc);
+        // Remove clamping: show raw totals
+        auto display0 = totals0;
+        printCsvRound(round++, display0, electedForDisplay0, allCandidates, noneAmt, noneSrc);
     }
 
     // Main loop
@@ -1472,18 +1486,35 @@ std::set<std::string> runMultiSeatElection_Tickets(const std::vector<std::vector
         // 2) Eliminate lowest
         double minVotes = std::numeric_limits<double>::infinity();
         for (const auto& [cand, votes] : voteCounts) {
-            if (!elected.count(cand) && !eliminated.count(cand)) {
-                minVotes = std::min(minVotes, votes);
+            if (elected.count(cand)) continue;
+            if (!minVotes || (votes + kEps) < minVotes) {
+                minVotes = votes;
             }
         }
+        if (!minVotes) break; // no candidates left
+
+        // Find all with the minimum vote (within epsilon)
         std::set<std::string> tied;
         for (const auto& [cand, votes] : voteCounts) {
-            if (!elected.count(cand) && !eliminated.count(cand) && std::abs(votes - minVotes) <= kEps) {
-                tied.insert(cand);
+            if (elected.count(cand)) continue;
+            if (std::abs(votes - minVotes) <= kEps) tied.insert(cand);
+        }
+
+        std::string toEliminate;
+        if (tied.size() == 1) {
+            toEliminate = *tied.begin();
+        }
+        else {
+            // §11D: if no surplus transfers this phase, use raw 2nd/3rd/...
+            toEliminate = resolveTieByRawRanks(ballots, tied);
+            if (toEliminate.empty()) {
+                // Fix: add declaration and initialization for 'history'
+                std::vector<std::map<std::string, double>> history;
+                history.push_back(voteCounts);
+
+                toEliminate = resolveTieSTVWithHistoryForElimination(history, ballots, tied, voteCounts, elected);
             }
         }
-        std::string toEliminate = tied.size() == 1 ? *tied.begin() : finalTiebreakPick(tied);
-        eliminated.insert(toEliminate);
 
         auto [transferred, sources] = eliminateAndTransferFull(toEliminate, tickets, elected, eliminated);
         voteCounts = recomputeCountsFromTickets(tickets, allCandidates, elected, eliminated);
@@ -1845,7 +1876,7 @@ static std::pair<std::map<std::string, double>,
                     }
                 }
             }
-            // If cont is empty, perBallot just leaves the system (exhausted surplus)
+            // If cont is empty, perBallot exhausts (no addition, no movedTotal increase)
         }
     }
 

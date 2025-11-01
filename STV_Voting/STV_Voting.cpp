@@ -16,6 +16,7 @@
 #include <limits> // <-- add this
 #include <random> // add this for drawing lots
 #include <cctype> // for std::toupper, std::isspace
+#include <new> // for std::bad_alloc
 #ifdef _WIN32
 #include <conio.h>
 #endif
@@ -619,8 +620,8 @@ static std::string resolveTieSTVWithHistoryForElimination(const std::vector<std:
         if (bestCands.size() == 1) return *bestCands.begin();
     }
 
-    // Secondary: least next continuing preferences (use continuing compression)
-    if (auto chosen = resolveTieNextContinuingLeast(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
+    // Secondary: least next continuing preferences (use MOST, not least)
+    if (auto chosen = resolveTieNextContinuing(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
         return chosen;
     }
 
@@ -1057,7 +1058,7 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
             if (tied.size() == 1) {
                 chosen = *tied.begin();
             } else {
-                // §11D: use 2nd/3rd/... preferences first
+                // §11D: use raw 2nd/3rd/... preferences first
                 chosen = resolveTieByRawRanks(ballots, tied);
                 if (chosen.empty()) {
                     chosen = resolveTieSTVWithHistory(history, ballots, tied, voteCounts, elected);
@@ -1931,71 +1932,83 @@ static std::pair<std::map<std::string, double>,
 #ifndef STV_NO_MAIN
 int main()
 {
-    for (;;)
-    {
-        std::vector<std::vector<std::string>> singleSeatBallots;
-        std::vector<std::vector<std::string>> multiSeatBallots;
-        std::vector<std::string> candidates;
-        int seats;
-
-        candidates = inputCandidateNames();
-        seats = inputNumberOfSeats();
-        
-        if (seats == 1) {
-            singleSeatBallots = inputBallotsByRowNumbers(candidates);
-
-            auto winner = runSingleSeatElection(singleSeatBallots);
-            if (!winner.empty()) {
-                std::cout << "\nElected (1): " << winner;
-            } else {
-                std::cout << "\nNo winner could be determined.";
-            }
-        }
-        else {
-            multiSeatBallots = inputBallotsByRowNumbers(candidates);
-
-            auto winners = runMultiSeatElection(multiSeatBallots, seats);
-
-            std::cout << "\nElected (" << winners.size() << "): ";
-            bool first = true;
-            for (const auto& w : winners) {
-                if (!first) std::cout << ", ";
-                std::cout << w;
-                first = false;
-            }
-        }
-
-        // Prompt until we get a clear Y or N
-        bool runAgain = false;
+    try {
         for (;;)
         {
-            std::cout << "\n\nRun a new election (Y/N)?\n";
-            char again = 'N';
-#ifdef _WIN32
-            again = _getch(); // single key, no Enter needed
-#else
-            std::string line;
-            if (!std::getline(std::cin, line)) return 0;
-            // take first non-space char if present
-            again = 0;
-            for (char ch : line) {
-                if (!std::isspace(static_cast<unsigned char>(ch))) { again = ch; break; }
-            }
-#endif
-            if (std::toupper(static_cast<unsigned char>(again)) == 'Y') {
-                std::cout << "\n\n";
-                runAgain = true;
-                break; // rerun the entire workflow
-            }
-            else if (std::toupper(static_cast<unsigned char>(again)) == 'N') {
-                return 0; // exit program
+            std::vector<std::vector<std::string>> singleSeatBallots;
+            std::vector<std::vector<std::string>> multiSeatBallots;
+            std::vector<std::string> candidates;
+            int seats;
+
+            candidates = inputCandidateNames();
+            seats = inputNumberOfSeats();
+            
+            if (seats == 1) {
+                singleSeatBallots = inputBallotsByRowNumbers(candidates);
+
+                auto winner = runSingleSeatElection(singleSeatBallots);
+                if (!winner.empty()) {
+                    std::cout << "\nElected (1): " << winner;
+                } else {
+                    std::cout << "\nNo winner could be determined.";
+                }
             }
             else {
-                std::cout << "Unrecognized input.\n";
-            }
-        }
+                multiSeatBallots = inputBallotsByRowNumbers(candidates);
 
-        if (!runAgain) break; // safety
+                auto winners = runMultiSeatElection(multiSeatBallots, seats);
+
+                std::cout << "\nElected (" << winners.size() << "): ";
+                bool first = true;
+                for (const auto& w : winners) {
+                    if (!first) std::cout << ", ";
+                    std::cout << w;
+                    first = false;
+                }
+            }
+
+            // Prompt until we get a clear Y or N
+            bool runAgain = false;
+            for (;;)
+            {
+                std::cout << "\n\nRun a new election (Y/N)?\n";
+                char again = 'N';
+#ifdef _WIN32
+                again = _getch(); // single key, no Enter needed
+#else
+                std::string line;
+                if (!std::getline(std::cin, line)) return 0;
+                // take first non-space char if present
+                again = 0;
+                for (char ch : line) {
+                    if (!std::isspace(static_cast<unsigned char>(ch))) { again = ch; break; }
+                }
+#endif
+                if (std::toupper(static_cast<unsigned char>(again)) == 'Y') {
+                    std::cout << "\n\n";
+                    bool runAgainInner = true; // to satisfy compiler warnings
+                    runAgain = runAgainInner;
+                    break; // rerun the entire workflow
+                }
+                else if (std::toupper(static_cast<unsigned char>(again)) == 'N') {
+                    return 0; // exit program
+                }
+                else {
+                    std::cout << "Unrecognized input.\n";
+                }
+            }
+
+            if (!runAgain) break; // safety
+        }
+    } catch (const std::bad_alloc& ex) {
+        std::cerr << "Error: memory allocation failed (std::bad_alloc). " << ex.what() << "\n";
+        return EXIT_FAILURE;
+    } catch (const std::exception& ex) {
+        std::cerr << "Unhandled exception: " << ex.what() << "\n";
+        return EXIT_FAILURE;
+    } catch (...) {
+        std::cerr << "Unhandled unknown exception.\n";
+        return EXIT_FAILURE;
     }
 }
 #endif

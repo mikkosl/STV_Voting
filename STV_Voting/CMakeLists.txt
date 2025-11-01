@@ -31,4 +31,34 @@ if (BUILD_STV_TESTS)
 
   set_property(TARGET stv_tests PROPERTY CXX_STANDARD 20)
   add_test(NAME stv_tests COMMAND stv_tests)
+
+  # Add a second lightweight test target
+  add_executable(stv_tests_more
+    "tests/MoreStvTests.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+
+  target_compile_definitions(stv_tests_more PRIVATE
+    STV_NO_MAIN=1
+    STV_EXPERIMENTAL_TICKETS=1
+  )
+
+  set_property(TARGET stv_tests_more PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_more COMMAND stv_tests_more)
+
+  # Add a third test target for last-batch no-next splits
+  add_executable(stv_tests_lastbatch
+    "tests/LastBatchNoNextTests.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+
+  target_compile_definitions(stv_tests_lastbatch PRIVATE
+    STV_NO_MAIN=1
+    STV_EXPERIMENTAL_TICKETS=1
+  )
+
+  set_property(TARGET stv_tests_lastbatch PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_lastbatch COMMAND stv_tests_lastbatch)
 endif()

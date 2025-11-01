@@ -1,0 +1,12 @@
+# ninja log v6
+4389	6737	7837018391196805	STV_Voting.exe	93e9dd083483561b
+25	4378	7837018347553627	CMakeFiles/STV_Voting.dir/STV_Voting.cpp.obj	8f5808edab56d49d
+127	7921	7837023489476867	CMakeFiles/stv_tests.dir/tests/ExperimentalTicketsTests.cpp.obj	b275626b5245da6a
+352	8070	7837023491708447	CMakeFiles/stv_tests_more.dir/tests/MoreStvTests.cpp.obj	50daf13ae6e1b36b
+615	8170	7837023494340117	CMakeFiles/stv_tests_lastbatch.dir/tests/LastBatchNoNextTests.cpp.obj	481f2371130f908
+938	18031	7837023497574663	CMakeFiles/stv_tests_lastbatch.dir/STV_Voting.cpp.obj	1712fd06b942fde9
+252	18081	7837023490721696	CMakeFiles/stv_tests.dir/STV_Voting.cpp.obj	4f593a52b7446001
+425	18167	7837023492439319	CMakeFiles/stv_tests_more.dir/STV_Voting.cpp.obj	d3870f3f2f5d3b09
+18084	21257	7837023669029145	stv_tests.exe	285355b3c643f93e
+18170	21258	7837023669894537	stv_tests_more.exe	137be6858b9d9b27
+18032	21309	7837023668513618	stv_tests_lastbatch.exe	6f4048c04c146079

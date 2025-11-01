@@ -1178,6 +1178,7 @@ std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::st
             std::map<std::string, double> transferredAmounts;
             std::map<std::string, std::vector<std::pair<std::string, double>>> sourceBreakdown;
 
+            // in runMultiSeatElection, where surplus is processed
             for (const auto& cand : newly) {
                 const double surplus = voteCounts[cand] - quota;
                 if (surplus > 0.0) {

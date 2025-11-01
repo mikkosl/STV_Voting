@@ -1,0 +1,8 @@
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/STV_Voting.dir
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/STV_Voting_exe.dir
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/stv_tests.dir
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/stv_tests_more.dir
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/stv_tests_lastbatch.dir
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/test.dir
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/edit_cache.dir
+C:/Users/mikko/source/repos/STV_Voting/STV_Voting/build/CMakeFiles/rebuild_cache.dir

@@ -6,10 +6,12 @@ project(STV_Voting LANGUAGES CXX)
 #
 
 # Enable the experimental ticket engine for this build
-add_compile_definitions(STV_EXPERIMENTAL_TICKETS=1)
+# add_compile_definitions(STV_EXPERIMENTAL_TICKETS=1) # Removed old way of defining compile definitions
 
 # Add source to this project's executable.
 add_executable (STV_Voting "STV_Voting.cpp" "STV_Voting.h")
+
+target_compile_definitions(STV_Voting PRIVATE STV_EXPERIMENTAL_TICKETS=1) # Added new way of defining compile definitions
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET STV_Voting PROPERTY CXX_STANDARD 20)

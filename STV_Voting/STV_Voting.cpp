@@ -184,13 +184,16 @@ void printCsvRound(
             // Aggregate amounts by source candidate to avoid duplicate entries
             std::map<std::string, double> agg;
             for (const auto& p : items) agg[p.first] += p.second;
-            // Print aggregated sources in deterministic order (by candidate name)
+            // Build a single string for sources in deterministic order (by candidate name)
+            std::ostringstream ss;
             bool firstSrc = true;
             for (const auto& kv : agg) {
-                if (!firstSrc) std::cout << "; ";
-                std::cout << kv.first << "(" << std::fixed << std::setprecision(2) << kv.second << ")";
+                if (!firstSrc) ss << "; ";
+                ss << kv.first << "(" << std::fixed << std::setprecision(2) << kv.second << ")";
                 firstSrc = false;
             }
+            std::string sourcesStr = ss.str();
+            if (!sourcesStr.empty()) std::cout << csvQuote(sourcesStr);
         }
         std::cout << "\n";
     }
@@ -1748,7 +1751,7 @@ static std::map<std::string, std::vector<int>> buildAssignedMap(
     const std::set<std::string>& eliminated)
 {
     std::map<std::string, std::vector<int>> assigned;
-    for (int i = 0; i < static_cast<int>(tickets.size()); ++i) {
+    for ( int i = 0; i < static_cast<int>(tickets.size()); ++i) {
         const auto& t = tickets[i];
         if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
         const std::string& c = t.prefs[t.pos];

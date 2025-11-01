@@ -629,7 +629,7 @@ static std::string resolveTieSTVWithHistoryForElimination(const std::vector<std:
     }
 
     // Secondary: least next continuing preferences (use MOST, not least)
-    if (auto chosen = resolveTieNextContinuing(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
+    if (auto chosen = resolveTieNextContinuingLeast(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
         return chosen;
     }
 
@@ -808,7 +808,7 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
     }
 
     // §11D secondary: next continuing preferences (use MOST, not least)
-    if (auto chosen = resolveTieNextContinuing(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
+    if (auto chosen = resolveTieNextContinuingLeast(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
         return chosen;
     }
 

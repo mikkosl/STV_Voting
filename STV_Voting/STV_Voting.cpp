@@ -1897,6 +1897,7 @@ static std::pair<std::map<std::string, double>,
 
 #endif // STV_EXPERIMENTAL_TICKETS
 
+#ifndef STV_NO_MAIN
 int main()
 {
     for (;;)
@@ -1966,5 +1967,5 @@ int main()
         if (!runAgain) break; // safety
     }
 }
-
+#endif
 

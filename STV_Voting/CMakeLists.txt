@@ -1,17 +1,8 @@
 ﻿cmake_minimum_required(VERSION 3.12)
 project(STV_Voting LANGUAGES CXX)
 
-# CMakeList.txt : CMake project for STV_Voting, include source and define
-# project specific logic here.
-#
-
-# Enable the experimental ticket engine for this build
-# add_compile_definitions(STV_EXPERIMENTAL_TICKETS=1) # Removed old way of defining compile definitions
-
-# Add source to this project's executable.
-add_executable (STV_Voting "STV_Voting.cpp" "STV_Voting.h")
-
-target_compile_definitions(STV_Voting PRIVATE STV_EXPERIMENTAL_TICKETS=1) # Added new way of defining compile definitions
+add_executable(STV_Voting "STV_Voting.cpp" "STV_Voting.h")
+target_compile_definitions(STV_Voting PRIVATE STV_EXPERIMENTAL_TICKETS=1)
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
   set_property(TARGET STV_Voting PROPERTY CXX_STANDARD 20)
@@ -21,4 +12,23 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# TODO: Add tests and install targets if needed.
+# Enable tests
+option(BUILD_STV_TESTS "Build STV tests" ON)
+if (BUILD_STV_TESTS)
+  enable_testing()
+
+  add_executable(stv_tests
+    "tests/ExperimentalTicketsTests.cpp"
+    "STV_Voting.cpp"  # reuse implementation
+    "STV_Voting.h"
+  )
+
+  # Ensure ticket engine path and no app main
+  target_compile_definitions(stv_tests PRIVATE
+    STV_NO_MAIN=1
+    STV_EXPERIMENTAL_TICKETS=1
+  )
+
+  set_property(TARGET stv_tests PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests COMMAND stv_tests)
+endif()

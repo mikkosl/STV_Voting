@@ -25,20 +25,19 @@
 #define STV_EXPERIMENTAL_TICKETS 1
 #endif
 
+// add near includes
+#if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
+#define STV_MAYBE_UNUSED [[maybe_unused]]
+#else
+#define STV_MAYBE_UNUSED
+#endif
+
 using namespace std;
 
 // Numeric epsilon for FP comparisons in tie logic
 constexpr double kEps = 1e-9;
 
 #if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
-
-// Move this struct definition to the top of the #if block, before any use of Ticket
-struct Ticket {
-    std::vector<std::string> prefs;
-    size_t pos = 0;          // index of current continuing choice
-    double weight = 1.0;     // rounded at each transfer with floor2
-    int batchId = 0;         // incremented when rerouted; used for "last batch" logic
-};
 
 // Add a single file-scope batch id shared by helper functions and election routine
 static int gBatchId = 1;
@@ -56,7 +55,7 @@ std::map<std::string, double> countFirstChoices(const std::vector<std::vector<st
 // Step 3: Elect candidates who meet the quota
 
 // Step 4: Transfer surplus
-void transferSurplus(std::string candidate, double surplus, double quota,
+STV_MAYBE_UNUSED void transferSurplus(std::string candidate, double surplus, double quota,
                      const std::vector<std::vector<std::string>>& ballots,
                      std::map<std::string, double>& voteCounts,
                      const std::set<std::string>& elected);
@@ -64,7 +63,7 @@ void transferSurplus(std::string candidate, double surplus, double quota,
 // Step 5: Eliminate the lowest-vote candidate
 
 // Step 6: Transfer votes from the eliminated candidate
-void transferEliminatedVotes(std::string eliminated, const std::vector<std::vector<std::string>>& ballots, std::map<std::string, double>& voteCounts, const std::set<std::string>& elected);
+STV_MAYBE_UNUSED void transferEliminatedVotes(std::string eliminated, const std::vector<std::vector<std::string>>& ballots, std::map<std::string, double>& voteCounts, const std::set<std::string>& elected);
 
 // Step 7: Resolve ties per §11D
 // Add this prototype above first use (e.g., above runSingleSeatElection)
@@ -87,6 +86,15 @@ static std::string resolveTieSTVWithHistoryForElimination(
     const std::set<std::string>& elected);
 
 #if defined(STV_EXPERIMENTAL_TICKETS) && STV_EXPERIMENTAL_TICKETS
+
+// Move this struct definition to the top of the #if block, before any use of Ticket
+struct Ticket {
+    std::vector<std::string> prefs;
+    size_t pos = 0;          // index of current continuing choice
+    double weight = 1.0;     // rounded at each transfer with floor2
+    int batchId = 0;         // incremented when rerouted; used for "last batch" logic
+};
+
 std::set<std::string> runMultiSeatElection_Tickets(const std::vector<std::vector<std::string>>&, int);
 
 // Place this prototype near the other prototypes inside the STV_EXPERIMENTAL_TICKETS block
@@ -650,7 +658,7 @@ static std::string resolveTieSTVWithHistoryForElimination(const std::vector<std:
 
 // Computes the distribution of surplus votes for logging purposes.
 // Returns a map of recipient candidate to amount received.
-std::map<std::string, double> computeSurplusDistributionForLog(
+STV_MAYBE_UNUSED std::map<std::string, double> computeSurplusDistributionForLog(
     const std::string& candidate,
     double surplus,
     const std::vector<std::vector<std::string>>& ballots,
@@ -727,7 +735,7 @@ std::map<std::string, double> computeSurplusDistributionForLog(
     return result;
 }
 
-std::map<std::string, double> computeEliminationDistributionForLog(
+STV_MAYBE_UNUSED std::map<std::string, double> computeEliminationDistributionForLog(
     const std::string& eliminated,
     const std::vector<std::vector<std::string>>& ballots,
     const std::set<std::string>& elected,
@@ -827,7 +835,7 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
     return finalTiebreakPick(tiedCandidates);
 }
 
-std::map<std::string, double> countFirstChoices(const std::vector<std::vector<std::string>>& ballots)
+STV_MAYBE_UNUSED std::map<std::string, double> countFirstChoices(const std::vector<std::vector<std::string>>& ballots)
 {
     std::map<std::string, double> counts;
 
@@ -849,7 +857,7 @@ std::map<std::string, double> countFirstChoices(const std::vector<std::vector<st
 }
 
 // Replace transferSurplus with this version
-void transferSurplus(std::string candidate,
+STV_MAYBE_UNUSED void transferSurplus(std::string candidate,
                      double surplus,
                      double quota,
                      const std::vector<std::vector<std::string>>& ballots,
@@ -949,7 +957,7 @@ void transferSurplus(std::string candidate,
     candIt->second = std::max(0.0, floor2(candIt->second - movedTotal));
 }
 
-void transferEliminatedVotes(std::string eliminated,
+STV_MAYBE_UNUSED void transferEliminatedVotes(std::string eliminated,
                              const std::vector<std::vector<std::string>>& ballots,
                              std::map<std::string, double>& voteCounts,
                              const std::set<std::string>& elected)
@@ -974,7 +982,7 @@ void transferEliminatedVotes(std::string eliminated,
         }
         if (current != eliminated) continue;
 
-        // Find next continuing preference to receive transfer
+        // Find next continuing preference after the eliminated candidate
         for (size_t j = curIndex + 1; j < ballot.size(); ++j) {
             const auto& c = ballot[j];
             if (isContinuing(c)) { nextRecipients.push_back(c); break; }
@@ -1644,7 +1652,8 @@ std::vector<std::vector<std::string>> inputBallotsByRowNumbers(const std::vector
     std::cout << "Press Enter on an empty line to finish.\n";
 
     int i = 1;
-    while (true) {
+    while (true)
+    {
         std::cout << i << ": ";
         std::string line;
         if (!std::getline(std::cin, line)) break; // EOF
@@ -1743,34 +1752,6 @@ static bool isContinuingCandidate(const std::string& c,
     const std::set<std::string>& eliminated)
 {
     return elected.count(c) == 0 && eliminated.count(c) == 0;
-}
-
-static void advanceToNextContinuing(Ticket& t,
-    const std::set<std::string>& elected,
-    const std::set<std::string>& eliminated)
-{
-    while (t.pos < t.prefs.size()) {
-        const std::string& c = t.prefs[t.pos];
-        if (isContinuingCandidate(c, elected, eliminated)) return;
-        ++t.pos;
-    }
-}
-
-static std::map<std::string, std::vector<int>> buildAssignedMap(
-    const std::vector<Ticket>& tickets,
-    const std::set<std::string>& elected,
-    const std::set<std::string>& eliminated)
-{
-    std::map<std::string, std::vector<int>> assigned;
-    for ( int i = 0; i < static_cast<int>(tickets.size()); ++i) {
-        const auto& t = tickets[i];
-        if (t.weight <= 0.0 || t.pos >= t.prefs.size()) continue;
-        const std::string& c = t.prefs[t.pos];
-        if (isContinuingCandidate(c, elected, eliminated)) {
-            assigned[c].push_back(i);
-        }
-    }
-    return assigned;
 }
 
 // Transfer elected candidate's surplus using only the "last equal-valued batch" that caused the surplus.

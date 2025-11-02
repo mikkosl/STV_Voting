@@ -149,4 +149,14 @@ if (BUILD_STV_TESTS)
   target_compile_definitions(stv_tests_lastbatch_only PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
   set_property(TARGET stv_tests_lastbatch_only PROPERTY CXX_STANDARD 20)
   add_test(NAME stv_tests_lastbatch_only COMMAND stv_tests_lastbatch_only)
+
+  # Add an eleventh test for single-continuing surplus goes entirely to that candidate
+  add_executable(stv_tests_single_continuing
+    "tests/SingleContinuingSurplusGoesAllTest.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_single_continuing PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
+  set_property(TARGET stv_tests_single_continuing PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_single_continuing COMMAND stv_tests_single_continuing)
 endif()

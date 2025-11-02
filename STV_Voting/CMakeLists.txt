@@ -89,4 +89,44 @@ if (BUILD_STV_TESTS)
   target_compile_definitions(stv_tests_surplus PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
   set_property(TARGET stv_tests_surplus PROPERTY CXX_STANDARD 20)
   add_test(NAME stv_tests_surplus COMMAND stv_tests_surplus)
+
+  # Add a fifth test target for first-phase overfill with raw ranks
+  add_executable(stv_tests_phase_overfill
+    "tests/FirstPhaseOverfillRawRankTest.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_phase_overfill PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
+  set_property(TARGET stv_tests_phase_overfill PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_phase_overfill COMMAND stv_tests_phase_overfill)
+
+  # Add a sixth test target for later-phase tie-breaking (history -> raw ranks -> lot)
+  add_executable(stv_tests_history_tie
+    "tests/HistoryTieBreakTests.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_history_tie PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
+  set_property(TARGET stv_tests_history_tie PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_history_tie COMMAND stv_tests_history_tie)
+
+  # Add a seventh test for quota rounding
+  add_executable(stv_tests_quota_rounding
+    "tests/QuotaRoundingTests.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_quota_rounding PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
+  set_property(TARGET stv_tests_quota_rounding PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_quota_rounding COMMAND stv_tests_quota_rounding)
+
+  # Add an eighth test for split flooring to 0.00
+  add_executable(stv_tests_split_floor_zero
+    "tests/NoNextSplitFloorZeroTests.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_split_floor_zero PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
+  set_property(TARGET stv_tests_split_floor_zero PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_split_floor_zero COMMAND stv_tests_split_floor_zero)
 endif()

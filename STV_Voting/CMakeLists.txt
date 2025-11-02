@@ -129,4 +129,24 @@ if (BUILD_STV_TESTS)
   target_compile_definitions(stv_tests_split_floor_zero PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
   set_property(TARGET stv_tests_split_floor_zero PROPERTY CXX_STANDARD 20)
   add_test(NAME stv_tests_split_floor_zero COMMAND stv_tests_split_floor_zero)
+
+  # Add a ninth test for first-phase surplus from all tickets
+  add_executable(stv_tests_firstphase_alltickets
+    "tests/FirstPhaseAllTicketsSurplusTest.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_firstphase_alltickets PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
+  set_property(TARGET stv_tests_firstphase_alltickets PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_firstphase_alltickets COMMAND stv_tests_firstphase_alltickets)
+
+  # Add a tenth test for later-phase surplus using only last equal-valued batch
+  add_executable(stv_tests_lastbatch_only
+    "tests/LaterPhaseLastBatchOnlyTest.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_lastbatch_only PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
+  set_property(TARGET stv_tests_lastbatch_only PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_lastbatch_only COMMAND stv_tests_lastbatch_only)
 endif()

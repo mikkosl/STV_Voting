@@ -1,153 +1,83 @@
-#include <vector>
+﻿#include <vector>
 #include <string>
 #include <set>
-#include <iostream>
 #include <sstream>
-#include <iomanip>
+#include <iostream>
+#include <cmath>
 
-std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>& ballots, int seats);
+std::set<std::string> runMultiSeatElection(const std::vector<std::vector<std::string>>&, int);
 
-// Minimal CSV splitter (handles quoted candidate and quoted Sources at tail)
-static std::vector<std::string> splitCsv(const std::string& line)
-{
-    std::vector<std::string> cols;
-    std::string cur;
-    bool inQuotes = false;
+// Minimal CSV splitter for our output
+static std::vector<std::string> splitCsv(const std::string& line) {
+    std::vector<std::string> cols; std::string cur; bool inQuotes = false;
     for (size_t i = 0; i < line.size(); ++i) {
         char ch = line[i];
-        if (ch == '"' ) {
-            if (inQuotes && i + 1 < line.size() && line[i+1] == '"') {
-                cur.push_back('"'); ++i; // escaped quote
-            } else {
-                inQuotes = !inQuotes;
-            }
-        } else if (ch == ',' && !inQuotes) {
-            cols.push_back(cur);
-            cur.clear();
-        } else {
-            cur.push_back(ch);
-        }
+        if (ch == '"') { if (inQuotes && i + 1 < line.size() && line[i+1] == '"') { cur.push_back('"'); ++i; } else { inQuotes = !inQuotes; } }
+        else if (ch == ',' && !inQuotes) { cols.push_back(cur); cur.clear(); }
+        else cur.push_back(ch);
     }
-    cols.push_back(cur);
-    return cols;
+    cols.push_back(cur); return cols;
 }
 
 static bool tryGetRow(const std::string& csv, int round, const std::string& candidate,
-                      double& transferredOut, std::string& sources)
-{
-    std::istringstream ss(csv);
-    std::string line;
+                      double& transferred, std::string& sources) {
+    std::istringstream ss(csv); std::string line;
     while (std::getline(ss, line)) {
-        if (line.empty()) continue;
-        if (line.rfind("Quota,", 0) == 0) continue;
-        if (line.rfind("Round,", 0) == 0) continue;
-
-        auto cols = splitCsv(line);
-        if (cols.size() < 6) continue;
-
-        // cols: 0=Round, 1=Candidate (quoted), 2=Votes, 3=Status, 4=Transferred, 5=Sources (quoted or empty)
-        int r = 0;
-        try { r = std::stoi(cols[0]); } catch (...) { continue; }
-
-        // candidate is quoted, remove quotes if present
-        std::string cand = cols[1];
-        if (!cand.empty() && cand.front() == '"' && cand.back() == '"') {
-            cand = cand.substr(1, cand.size()-2);
-        }
-
+        if (line.empty() || line.rfind("Quota,",0)==0 || line.rfind("Round,",0)==0) continue;
+        auto c = splitCsv(line); if (c.size() < 6) continue;
+        int r = 0; try { r = std::stoi(c[0]); } catch (...) { continue; }
+        auto cand = c[1]; if (!cand.empty() && cand.front()=='"' && cand.back()=='"') cand = cand.substr(1, cand.size()-2);
         if (r != round || cand != candidate) continue;
-
-        // Transferred can be empty
-        transferredOut = 0.0;
-        if (!cols[4].empty()) {
-            try { transferredOut = std::stod(cols[4]); } catch (...) { transferredOut = 0.0; }
-        }
-
-        // Sources: remove quotes if present
-        sources = cols[5];
-        if (!sources.empty() && sources.front() == '"' && sources.back() == '"') {
-            sources = sources.substr(1, sources.size()-2);
-        }
+        transferred = 0.0; if (!c[4].empty()) try { transferred = std::stod(c[4]); } catch (...) {}
+        sources = c[5]; if (!sources.empty() && sources.front()=='"' && sources.back()=='"') sources = sources.substr(1, sources.size()-2);
         return true;
     }
     return false;
 }
 
-static int fail(const char* msg) { std::cout << "FAIL: " << msg << "\n"; return 1; }
+static bool approx(double a, double b) { return std::fabs(a - b) <= 0.01; }
+static int fail(const char* m){ std::cout << "FAIL: " << m << "\n"; return 1; }
 
-// Scenario:
-// Seats=2, ballots:
-//  - A,B,C
-//  - A,B,C
-//  - A
-//  - B
-//  - C
-// Quota = ceil(500/3)/100 = 1.67
-// Round 1: A elected (3.00), surplus 1.33 distributed proportionally from ALL A tickets:
-//   perBallot = floor2(1.33/3)=0.44
-//   B gets 0.88 (two A,B,C) + 0.22 split from A-only => 1.10; C gets 0.22
-//   Expect: Round 1: B Transferred=1.10 from A; C Transferred=0.22 from A
-// Next phase: B now meets quota (2.10), elected; its surplus arises later => last-batch-only.
-//   B surplus = 0.43. Last-batch at B are 0.44,0.44,0.22 fragments from A�s transfer.
-//   denom=3, perBallot=0.14.
-//   Two 0.44 have next=C => C +0.28; the 0.22 has no next => split among continuing (only C) => +0.14.
-//   Expect: Round 2: C Transferred=0.42 from B.
-int main()
-{
+// Seats=2
+// Ballots: 2x A,B,C; 1x A; 1x B; 1x C
+// Quota = ceil(5/3 to 2dp) = 1.67
+// First phase: A elected with 3.00; surplus=1.33; perBallot=floor2(1.33/3)=0.44 using ALL A tickets.
+//   - Two A,B,C -> B +0.88; one A-only has no-next -> split among remaining (B,C), split=floor2(0.44/2)=0.22 => B +0.22, C +0.22.
+//   Expect Round 1: B Transferred=1.10 from A; C Transferred=0.22 from A.
+// Later phase: B now ≥ quota; B surplus from last batch only (tickets from A’s transfer): 0.44,0.44,0.22
+//   denom=3; perBallot=floor2(0.43/3)=0.14; two with next=C => +0.28; 0.22 no-next -> split to C (only remaining) => +0.14
+//   Expect Round 2: C Transferred=0.42 from B.
+int main() {
     std::vector<std::vector<std::string>> ballots = {
-        {"A","B","C"},
-        {"A","B","C"},
-        {"A"},
-        {"B"},
-        {"C"}
+        {"A","B","C"}, {"A","B","C"}, {"A"}, {"B"}, {"C"}
     };
 
-    // Capture stdout
-    std::streambuf* oldBuf = std::cout.rdbuf();
-    std::ostringstream capture;
-    std::cout.rdbuf(capture.rdbuf());
+    // Capture program CSV
+    std::streambuf* old = std::cout.rdbuf();
+    std::ostringstream cap; std::cout.rdbuf(cap.rdbuf());
 
     auto winners = runMultiSeatElection(ballots, 2);
 
-    // Restore stdout
-    std::cout.rdbuf(oldBuf);
-    const std::string out = capture.str();
+    std::cout.rdbuf(old);
+    const std::string out = cap.str();
 
-    // Sanity winners
-    if (winners.count("A") != 1 || winners.count("B") != 1 || winners.size() != 2) {
-        std::cout << "Winners:";
-        for (auto& w : winners) std::cout << " " << w;
-        std::cout << " expected: A B\n";
+    if (winners.count("A") != 1 || winners.count("B") != 1 || winners.size() != 2)
         return fail("winners mismatch");
-    }
 
-    // Round 1 assertions (first phase proportional)
-    {
-        double tB = 0.0, tC = 0.0; std::string srcB, srcC;
-        if (!tryGetRow(out, 1, "B", tB, srcB)) return fail("missing round 1 row for B");
-        if (!tryGetRow(out, 1, "C", tC, srcC)) return fail("missing round 1 row for C");
+    // Round 1: proportional surplus (ALL A tickets)
+    double tB=0, tC=0; std::string sB, sC;
+    if (!tryGetRow(out, 1, "B", tB, sB)) return fail("missing R1 B");
+    if (!tryGetRow(out, 1, "C", tC, sC)) return fail("missing R1 C");
+    if (!approx(tB, 1.10)) return fail("R1 B transferred != 1.10");
+    if (!approx(tC, 0.22)) return fail("R1 C transferred != 0.22");
+    if (sB.find("A(1.10)") == std::string::npos) return fail("R1 B missing A(1.10)");
+    if (sC.find("A(0.22)") == std::string::npos) return fail("R1 C missing A(0.22)");
 
-        auto approx = [](double a, double b){ return std::fabs(a - b) <= 0.01; };
-        if (!approx(tB, 1.10)) { std::cout << "Round1 B transferred=" << tB << " expected=1.10\n"; return fail("round1 B transferred mismatch"); }
-        if (!approx(tC, 0.22)) { std::cout << "Round1 C transferred=" << tC << " expected=0.22\n"; return fail("round1 C transferred mismatch"); }
-
-        if (srcB.find("A(1.10)") == std::string::npos)
-            return fail("round1 B sources missing A(1.10)");
-        if (srcC.find("A(0.22)") == std::string::npos)
-            return fail("round1 C sources missing A(0.22)");
-    }
-
-    // Round 2 assertions (later phase last-batch only)
-    {
-        double tC = 0.0; std::string srcC;
-        if (!tryGetRow(out, 2, "C", tC, srcC)) return fail("missing round 2 row for C");
-
-        auto approx = [](double a, double b){ return std::fabs(a - b) <= 0.01; };
-        if (!approx(tC, 0.42)) { std::cout << "Round2 C transferred=" << tC << " expected=0.42\n"; return fail("round2 C transferred mismatch"); }
-
-        if (srcC.find("B(0.42)") == std::string::npos)
-            return fail("round2 C sources missing B(0.42)");
-    }
+    // Round 2: last-batch-only surplus from B
+    double tC2=0; std::string sC2;
+    if (!tryGetRow(out, 2, "C", tC2, sC2)) return fail("missing R2 C");
+    if (!approx(tC2, 0.42)) return fail("R2 C transferred != 0.42");
+    if (sC2.find("B(0.42)") == std::string::npos) return fail("R2 C missing B(0.42)");
 
     std::cout << "SurplusTransferTests: All tests passed.\n";
     return 0;

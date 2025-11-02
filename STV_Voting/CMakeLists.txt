@@ -86,12 +86,7 @@ if (BUILD_STV_TESTS)
     "STV_Voting.cpp"
     "STV_Voting.h"
   )
-  target_compile_definitions(stv_tests_surplus PRIVATE
-    STV_NO_MAIN=1
-  )
-  if (STV_USE_EXPERIMENTAL_TICKETS)
-    target_compile_definitions(stv_tests_surplus PRIVATE STV_EXPERIMENTAL_TICKETS=1)
-  endif()
+  target_compile_definitions(stv_tests_surplus PRIVATE STV_NO_MAIN=1 STV_EXPERIMENTAL_TICKETS=1)
   set_property(TARGET stv_tests_surplus PROPERTY CXX_STANDARD 20)
   add_test(NAME stv_tests_surplus COMMAND stv_tests_surplus)
 endif()

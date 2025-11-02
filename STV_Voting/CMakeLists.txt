@@ -79,4 +79,19 @@ if (BUILD_STV_TESTS)
 
   set_property(TARGET stv_tests_lastbatch PROPERTY CXX_STANDARD 20)
   add_test(NAME stv_tests_lastbatch COMMAND stv_tests_lastbatch)
+
+  # Add a fourth test target for surplus transfer behavior
+  add_executable(stv_tests_surplus
+    "tests/SurplusTransferTests.cpp"
+    "STV_Voting.cpp"
+    "STV_Voting.h"
+  )
+  target_compile_definitions(stv_tests_surplus PRIVATE
+    STV_NO_MAIN=1
+  )
+  if (STV_USE_EXPERIMENTAL_TICKETS)
+    target_compile_definitions(stv_tests_surplus PRIVATE STV_EXPERIMENTAL_TICKETS=1)
+  endif()
+  set_property(TARGET stv_tests_surplus PROPERTY CXX_STANDARD 20)
+  add_test(NAME stv_tests_surplus COMMAND stv_tests_surplus)
 endif()

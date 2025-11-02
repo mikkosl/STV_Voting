@@ -827,8 +827,8 @@ std::string resolveTieSTVWithHistory(const std::vector<std::map<std::string, dou
         if (bestCands.size() == 1) return *bestCands.begin();
     }
 
-    // §11D secondary: next continuing preferences (use MOST, not least)
-    if (auto chosen = resolveTieNextContinuing(ballots, tiedCandidates, voteCounts, elected); !chosen.empty()) {
+    // §11D secondary: original 2nd/3rd/... (raw ranks), not next-continuing
+    if (auto chosen = resolveTieByRawRanks(ballots, tiedCandidates); !chosen.empty()) {
         return chosen;
     }
 

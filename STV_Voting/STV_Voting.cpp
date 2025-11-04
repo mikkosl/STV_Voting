@@ -1742,6 +1742,9 @@ std::vector<std::string> inputCandidateNames()
         }
     }
 
+    // Sort alphabetically after input so row numbers map to alphabetical order
+    std::sort(candidates.begin(), candidates.end());
+
     std::cout << "Captured " << candidates.size() << " unique candidate(s).\n";
     return candidates;
 }

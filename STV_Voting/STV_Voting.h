@@ -10,7 +10,7 @@
 // Read candidate names from stdin, one per line, until an empty line.
 // - Trims surrounding whitespace.
 // - Ignores duplicate names (case-sensitive).
-// - Preserves insertion order for unique names.
+// - Returns names sorted in alphabetical order.
 std::vector<std::string> inputCandidateNames();
 
 // Read number of seats (positive integer) from stdin with basic validation.

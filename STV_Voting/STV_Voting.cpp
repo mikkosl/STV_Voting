@@ -513,7 +513,8 @@ static std::string finalTiebreakPick(const std::set<std::string>& tiedCandidates
 }
 
 // Add this helper function above its first use (e.g., above resolveTieSTVWithHistory)
-static std::string resolveTieNextContinuing(const std::vector<std::vector<std::string>>& ballots,
+STV_MAYBE_UNUSED static std::string resolveTieNextContinuing(
+    const std::vector<std::vector<std::string>>& ballots,
     const std::set<std::string>& tiedCandidates,
     const std::map<std::string, double>& voteCounts,
     const std::set<std::string>& elected)
@@ -567,10 +568,11 @@ static std::string resolveTieNextContinuing(const std::vector<std::vector<std::s
 }
 
 // Helper: next-continuing-preference tiebreak (least preferred for elimination)
-static std::string resolveTieNextContinuingLeast(const std::vector<std::vector<std::string>>& ballots,
-                                                 const std::set<std::string>& tiedCandidates,
-                                                 const std::map<std::string, double>& voteCounts,
-                                                 const std::set<std::string>& elected)
+STV_MAYBE_UNUSED static std::string resolveTieNextContinuingLeast(
+    const std::vector<std::vector<std::string>>& ballots,
+    const std::set<std::string>& tiedCandidates,
+    const std::map<std::string, double>& voteCounts,
+    const std::set<std::string>& elected)
 {
     if (tiedCandidates.empty()) return {};
 
@@ -1621,7 +1623,6 @@ void displayCandidateList(const std::vector<std::string>& candidates)
         return;
     }
     const int width = static_cast<int>(std::to_string(candidates.size()).size());
-    std::cout << "Candidates:\n";
     for (size_t i = 0; i < candidates.size(); ++i) {
         std::cout << std::setw(width) << (i + 1) << ") " << candidates[i] << "\n";
     }
@@ -1744,7 +1745,7 @@ std::vector<std::string> inputCandidateNames()
     // Sort alphabetically after input so row numbers map to alphabetical order
     std::sort(candidates.begin(), candidates.end());
 
-    std::cout << "Captured " << candidates.size() << " unique candidate(s).\n";
+    std::cout << "Captured " << candidates.size() << " unique candidate(s):\n";
     displayCandidateList(candidates);
     return candidates;
 }

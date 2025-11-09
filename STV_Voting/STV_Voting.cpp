@@ -1683,7 +1683,6 @@ static ParseBallotResult parseBallotFromRowNumbersWithValidation(
 std::vector<std::vector<std::string>> inputBallotsByRowNumbers(const std::vector<std::string>& candidates)
 {
     std::vector<std::vector<std::string>> ballots;
-    displayCandidateList(candidates);
 
     std::cout << "Enter ballots as comma-separated row numbers in preference order (e.g., 1,3,2).\n";
     std::cout << "Press Enter on an empty line to finish.\n";
@@ -1746,6 +1745,7 @@ std::vector<std::string> inputCandidateNames()
     std::sort(candidates.begin(), candidates.end());
 
     std::cout << "Captured " << candidates.size() << " unique candidate(s).\n";
+    displayCandidateList(candidates);
     return candidates;
 }
 
